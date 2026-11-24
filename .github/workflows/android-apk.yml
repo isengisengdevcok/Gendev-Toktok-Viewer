@@ -69,13 +69,13 @@ jobs:
           gradle-version: '9.3.1'
 
       - name: Run Unit & Robolectric Tests
-        run: gradle :app:testDebugUnitTest --no-daemon
+        run: gradle :app:testDebugUnitTest --no-daemon --no-configuration-cache
 
       - name: Build Debug APK
-        run: gradle :app:assembleDebug --no-daemon
+        run: gradle :app:assembleDebug --no-daemon --no-configuration-cache
 
       - name: Build Release APK
-        run: gradle :app:assembleRelease --no-daemon
+        run: gradle :app:assembleRelease --no-daemon --no-configuration-cache
 
       - name: Upload Debug APK
         uses: actions/upload-artifact@v4

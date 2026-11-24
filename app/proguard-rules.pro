@@ -17,7 +17,9 @@
 -keep,allowobfuscation,allowshrinking class retrofit2.Response
 -keep,allowobfuscation,allowshrinking class retrofit2.Call
 
-# Moshi
+# Moshi Kotlin Reflection
+-keep class kotlin.Metadata { *; }
+-keep class com.gendev.tiktokviewer.data.remote.dto.** { *; }
 -keepclassmembers class com.gendev.tiktokviewer.data.remote.dto.** { *; }
 -keepclassmembers class * {
     @com.squareup.moshi.FromJson <methods>;

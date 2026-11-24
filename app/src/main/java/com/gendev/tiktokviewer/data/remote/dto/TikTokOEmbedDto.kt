@@ -1,9 +1,7 @@
 package com.gendev.tiktokviewer.data.remote.dto
 
 import com.squareup.moshi.Json
-import com.squareup.moshi.JsonClass
 
-@JsonClass(generateAdapter = true)
 data class TikTokOEmbedDto(
     @Json(name = "version") val version: String? = null,
     @Json(name = "type") val type: String? = null,
