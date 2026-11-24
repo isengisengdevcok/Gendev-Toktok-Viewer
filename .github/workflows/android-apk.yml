@@ -3,9 +3,13 @@ name: Build GENDEV TikTok Viewer APK
 on:
   push:
     branches: [ main, master ]
+    tags: [ 'v*' ]
   pull_request:
     branches: [ main, master ]
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   test-and-build:
@@ -103,3 +107,30 @@ jobs:
           name: gendev-tiktok-viewer-release-apk
           path: app/build/outputs/apk/release/*.apk
           if-no-files-found: error
+
+      - name: Publish GitHub Release
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p release-assets
+          DEBUG_APK=$(find app/build/outputs/apk/debug -maxdepth 1 -name '*.apk' | head -n 1)
+          RELEASE_APK=$(find app/build/outputs/apk/release -maxdepth 1 -name '*.apk' | head -n 1)
+          cp "$DEBUG_APK" release-assets/gendev-tiktok-viewer-debug.apk
+          cp "$RELEASE_APK" release-assets/gendev-tiktok-viewer-release.apk
+
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            TAG="${{ github.ref_name }}"
+          else
+            TAG="v1.0.0-build.${{ github.run_number }}"
+          fi
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" release-assets/*.apk --clobber
+          else
+            gh release create "$TAG" release-assets/*.apk \
+              --target "${{ github.sha }}" \
+              --title "GENDEV TikTok Viewer ($TAG)" \
+              --notes "Automated Debug & Release APK build from commit ${{ github.sha }}." \
+              --latest
+          fi
