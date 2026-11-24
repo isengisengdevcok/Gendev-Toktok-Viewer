@@ -268,13 +268,14 @@ class GendevViewModelAndOEmbedTest {
             })
             .build()
 
-        val moshi = Moshi.Builder().addLast(KotlinJsonAdapterFactory()).build()
-        val oEmbedService = Retrofit.Builder()
-            .baseUrl("https://www.tiktok.com/")
-            .client(failingClient)
-            .addConverterFactory(MoshiConverterFactory.create(moshi))
-            .build()
-            .create(TikTokOEmbedService::class.java)
+        val oEmbedService = object : TikTokOEmbedService {
+            override suspend fun getOEmbed(videoUrl: String): retrofit2.Response<com.gendev.tiktokviewer.data.remote.dto.TikTokOEmbedDto> {
+                return retrofit2.Response.error(
+                    503,
+                    "Service Unavailable".toResponseBody("text/plain".toMediaType())
+                )
+            }
+        }
 
         val proxiProvider = ProxiTokProvider(
             providerId = "down_node",
@@ -317,9 +318,7 @@ class GendevViewModelAndOEmbedTest {
         }
 
         val vm = ViewerViewModel(repository, fakeAi)
-        withTimeout(5_000L) {
-            vm.viewerEngineMode.first { it == ViewerEngineMode.GUEST_SCROLL }
-        }
+        advanceUntilIdle()
 
         // Must never strand user on dead error screen when stream APIs fail
         assertEquals(ViewerEngineMode.GUEST_SCROLL, vm.viewerEngineMode.value)

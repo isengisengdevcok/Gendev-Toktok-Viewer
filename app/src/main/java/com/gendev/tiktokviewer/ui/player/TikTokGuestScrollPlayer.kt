@@ -50,7 +50,8 @@ private const val MOBILE_WEB_UA =
 /**
  * Lightweight JS/CSS cosmetic cleanup for TikTok Guest Mobile Web:
  * - Suppresses intrusive "Log in to continue" / "Open TikTok App" banners & modals
- * - Does NOT tamper with security/CAPTCHA challenges
+ *   that otherwise freeze scrolling after ~2 videos
+ * - Continuously unlocks body/html scroll via MutationObserver without touching CAPTCHA/security challenges
  * - Keeps layout AMOLED dark and scroll-first
  */
 private val GUEST_CLEANUP_JS = """
@@ -61,16 +62,102 @@ private val GUEST_CLEANUP_JS = """
           var s = document.createElement('style');
           s.id = styleId;
           s.textContent = [
-            'html, body { background-color: #000000 !important; overscroll-behavior-y: contain; }',
-            '#login-modal, [data-e2e="login-modal"], [class*="DivLoginModal"], [class*="LoginModal"],',
+            'html, body, #app, #main { background-color: #000000 !important; overflow-y: auto !important; touch-action: pan-y !important; }',
+            'body { position: static !important; }',
+            '#login-modal, [data-e2e="login-modal"], [data-e2e="login-guide"],',
+            '[class*="DivLoginModal"], [class*="LoginModal"], [class*="DivLoginGuide"],',
             '[class*="DivBottomBanner"], [class*="OpenApp"], [class*="DownloadApp"],',
             '[data-e2e="open-app-button"], [data-e2e="top-login-button"],',
             '[class*="DivFixedBottomContainer"], [class*="AppBanner"] { display: none !important; visibility: hidden !important; pointer-events: none !important; }'
           ].join(' ');
           (document.head || document.documentElement).appendChild(s);
         }
-        var closeBtn = document.querySelector('[data-e2e="modal-close-inner-button"], [aria-label="Close"], [aria-label="Tutup"]');
-        if (closeBtn) { closeBtn.click(); }
+
+        function isCaptchaNode(el) {
+          if (!el) return false;
+          var id = (el.id || '').toLowerCase();
+          var cls = (typeof el.className === 'string' ? el.className : '').toLowerCase();
+          var txt = (el.textContent || '').toLowerCase();
+          if (id.indexOf('captcha') !== -1 || cls.indexOf('captcha') !== -1) return true;
+          if (el.querySelector && el.querySelector('[id*="captcha"], [class*="captcha"], iframe[src*="captcha"]')) return true;
+          return txt.indexOf('verify to continue') !== -1 || txt.indexOf('drag the puzzle') !== -1;
+        }
+
+        function unlockGuestScroll() {
+          try {
+            var html = document.documentElement;
+            var body = document.body;
+            if (html) {
+              if (html.style.overflow === 'hidden') html.style.overflow = 'auto';
+              if (html.style.overflowY === 'hidden') html.style.overflowY = 'auto';
+            }
+            if (body) {
+              if (body.style.overflow === 'hidden') body.style.overflow = 'auto';
+              if (body.style.overflowY === 'hidden') body.style.overflowY = 'auto';
+              if (body.style.position === 'fixed') {
+                body.style.position = 'static';
+                body.style.top = '';
+                body.style.width = '';
+              }
+            }
+
+            var closeSelectors = '[data-e2e="modal-close-inner-button"], [data-e2e="login-modal"] [aria-label="Close"], [aria-label="Close"], [aria-label="Tutup"]';
+            var closeBtns = document.querySelectorAll(closeSelectors);
+            for (var i = 0; i < closeBtns.length; i++) {
+              var btn = closeBtns[i];
+              var parentDialog = btn.closest ? btn.closest('[role="dialog"], [aria-modal="true"], [class*="Modal"]') : null;
+              if (!isCaptchaNode(parentDialog)) {
+                btn.click();
+              }
+            }
+
+            var overlays = document.querySelectorAll('#login-modal, [data-e2e="login-modal"], [role="dialog"], [aria-modal="true"], [class*="TUXModal"], [class*="DivModalMask"]');
+            for (var j = 0; j < overlays.length; j++) {
+              var node = overlays[j];
+              if (isCaptchaNode(node)) continue;
+              var content = (node.textContent || '').toLowerCase();
+              var isLoginOrAppPrompt =
+                node.id === 'login-modal' ||
+                node.getAttribute('data-e2e') === 'login-modal' ||
+                content.indexOf('log in') !== -1 ||
+                content.indexOf('sign up') !== -1 ||
+                content.indexOf('masuk ke tiktok') !== -1 ||
+                content.indexOf('daftar') !== -1 ||
+                content.indexOf('open tiktok') !== -1 ||
+                content.indexOf('download') !== -1;
+              if (isLoginOrAppPrompt) {
+                node.style.setProperty('display', 'none', 'important');
+                node.style.setProperty('pointer-events', 'none', 'important');
+              }
+            }
+          } catch (e) {}
+        }
+
+        unlockGuestScroll();
+
+        if (!window.__gendevGuestObserverAttached) {
+          window.__gendevGuestObserverAttached = true;
+          var scheduled = false;
+          var observer = new MutationObserver(function() {
+            if (scheduled) return;
+            scheduled = true;
+            setTimeout(function() {
+              scheduled = false;
+              unlockGuestScroll();
+            }, 150);
+          });
+          if (document.body || document.documentElement) {
+            observer.observe(document.body || document.documentElement, {
+              childList: true,
+              subtree: true,
+              attributes: true,
+              attributeFilter: ['style', 'class']
+            });
+          }
+          window.addEventListener('touchend', function() {
+            setTimeout(unlockGuestScroll, 180);
+          }, { passive: true });
+        }
       } catch (e) {}
     })();
 """.trimIndent()
@@ -99,6 +186,8 @@ fun TikTokGuestScrollPlayer(
     val webView = remember {
         WebView(context).apply {
             setBackgroundColor(AndroidColor.BLACK)
+            isVerticalScrollBarEnabled = false
+            overScrollMode = android.view.View.OVER_SCROLL_NEVER
             layoutParams = ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT
