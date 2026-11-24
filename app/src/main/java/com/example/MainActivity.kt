@@ -126,6 +126,7 @@ fun GendevViewerApp(viewModel: ViewerViewModel) {
             onRetry = { viewModel.loadFeed(forceRefresh = true) },
             onSwitchSource = viewModel::switchSourceAndRetry,
             onFallbackToEmbed = viewModel::fallbackVideoToEmbed,
+            onGuestGateDetected = viewModel::handleGuestGateDetected,
             viewerEngineMode = viewerEngineMode,
             guestUrl = guestUrl,
             guestReloadToken = guestReloadToken

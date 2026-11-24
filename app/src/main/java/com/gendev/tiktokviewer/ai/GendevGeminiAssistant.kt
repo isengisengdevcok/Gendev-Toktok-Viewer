@@ -41,6 +41,10 @@ sealed interface AiVideoInsightState {
 interface GeminiScrollAssistant {
     suspend fun buildVibeDiscovery(userMoodOrTopic: String): AiVibeSuggestion
     fun streamVideoInsight(video: PublicVideo): Flow<AiVideoInsightState>
+    suspend fun generateEndlessStreamQueries(
+        seenQueries: List<String>,
+        currentTopic: String = "#FYP"
+    ): List<String> = emptyList()
 }
 
 /**
@@ -67,12 +71,31 @@ class FirebaseGeminiScrollAssistant : GeminiScrollAssistant {
         )
     )
 
+    private val endlessTopicsSchema = Schema.obj(
+        properties = mapOf(
+            "queries" to Schema.array(
+                items = Schema.string(),
+                description = "5 distinct, high-volume public TikTok search keywords or single hashtags without # symbol"
+            )
+        )
+    )
+
     private val structuredModel by lazy {
         Firebase.ai.generativeModel(
             modelName = "gemini-3.8-flash",
             generationConfig = generationConfig {
                 responseMimeType = "application/json"
                 responseSchema = vibeSchema
+            }
+        )
+    }
+
+    private val endlessTopicModel by lazy {
+        Firebase.ai.generativeModel(
+            modelName = "gemini-3.8-flash",
+            generationConfig = generationConfig {
+                responseMimeType = "application/json"
+                responseSchema = endlessTopicsSchema
             }
         )
     }
@@ -172,6 +195,49 @@ class FirebaseGeminiScrollAssistant : GeminiScrollAssistant {
         } catch (e: Exception) {
             Log.e(TAG, "AI insight streaming failed", e)
             emit(AiVideoInsightState.Error(e.localizedMessage ?: "Gagal memuat ringkasan Gemini AI."))
+        }
+    }
+
+    override suspend fun generateEndlessStreamQueries(
+        seenQueries: List<String>,
+        currentTopic: String
+    ): List<String> {
+        val seenText = seenQueries.takeLast(15).joinToString(", ").ifBlank { "none" }
+        val prompt = """
+            Kamu adalah kurator otomatis feed video publik TikTok agar pengguna bisa scroll terus tanpa batas.
+            Topik aktif saat ini: "$currentTopic".
+            Kata kunci yang SUDAH dipakai: [$seenText].
+            Berikan tepat 5 kata kunci pencarian publik yang BARU, beragam, dan sangat populer di TikTok Indonesia maupun global (1-2 kata per item, tanpa tanda #, tanpa angka urut), misalnya hiburan, komedi, kuliner, musik, hewan lucu, alam, olahraga, otomotif, teknologi, travel.
+        """.trimIndent()
+
+        return try {
+            val response = withTimeout(30_000L) {
+                endlessTopicModel.generateContent(prompt)
+            }
+            val rawJson = response.text ?: return emptyList()
+            val json = JSONObject(rawJson)
+            val arr = json.optJSONArray("queries") ?: return emptyList()
+            val seenSet = seenQueries.mapTo(HashSet()) { it.lowercase().trim() }
+            buildList {
+                for (i in 0 until arr.length()) {
+                    val cleaned = arr.optString(i)
+                        .trim()
+                        .removePrefix("#")
+                        .replace(Regex("[^A-Za-z0-9_ ]"), "")
+                        .trim()
+                    if (cleaned.isNotBlank() && cleaned.lowercase() !in seenSet) {
+                        add(cleaned)
+                    }
+                }
+            }.distinct().take(5)
+        } catch (e: TimeoutCancellationException) {
+            Log.e(TAG, "AI endless query generation timed out", e)
+            emptyList()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.e(TAG, "AI endless query generation failed", e)
+            emptyList()
         }
     }
 }

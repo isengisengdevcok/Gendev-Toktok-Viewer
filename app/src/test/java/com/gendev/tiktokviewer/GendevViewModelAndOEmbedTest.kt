@@ -178,7 +178,8 @@ class GendevViewModelAndOEmbedTest {
             playbackProvider = TikTokPlaybackProviderImpl(),
             selfHostedFactory = { url ->
                 ProxiTokProvider("self", url, "Self", VideoSourceKind.PROXITOK_SELF_HOSTED, client, testDispatcher)
-            }
+            },
+            ioDispatcher = testDispatcher
         )
 
         val vm = ViewerViewModel(repository, startInUnifiedScroll = false)
@@ -299,7 +300,8 @@ class GendevViewModelAndOEmbedTest {
             playbackProvider = TikTokPlaybackProviderImpl(),
             selfHostedFactory = { url ->
                 ProxiTokProvider("self", url, "Self", VideoSourceKind.PROXITOK_SELF_HOSTED, failingClient, testDispatcher)
-            }
+            },
+            ioDispatcher = testDispatcher
         )
 
         val fakeAi = object : GeminiScrollAssistant {
@@ -358,7 +360,8 @@ class GendevViewModelAndOEmbedTest {
             playbackProvider = TikTokPlaybackProviderImpl(),
             selfHostedFactory = { url ->
                 ProxiTokProvider("self", url, "Self", VideoSourceKind.PROXITOK_SELF_HOSTED, client, testDispatcher)
-            }
+            },
+            ioDispatcher = testDispatcher
         )
 
         val vm = ViewerViewModel(repository)
@@ -436,7 +439,8 @@ class GendevViewModelAndOEmbedTest {
             playbackProvider = TikTokPlaybackProviderImpl(),
             selfHostedFactory = { url ->
                 ProxiTokProvider("self", url, "Self", VideoSourceKind.PROXITOK_SELF_HOSTED, client, testDispatcher)
-            }
+            },
+            ioDispatcher = testDispatcher
         )
 
         val vm = ViewerViewModel(repository)
@@ -492,7 +496,8 @@ class GendevViewModelAndOEmbedTest {
             playbackProvider = TikTokPlaybackProviderImpl(),
             selfHostedFactory = { url ->
                 ProxiTokProvider("self", url, "Self", VideoSourceKind.PROXITOK_SELF_HOSTED, failingClient, testDispatcher)
-            }
+            },
+            ioDispatcher = testDispatcher
         )
 
         val vm = ViewerViewModel(repository, startInUnifiedScroll = true)
@@ -509,5 +514,100 @@ class GendevViewModelAndOEmbedTest {
         advanceUntilIdle()
         assertEquals("https://www.tiktok.com/foryou", vm.guestUrl.value)
         assertEquals(initialToken + 2, vm.guestReloadToken.value)
+    }
+
+    @Test
+    fun `ai assistant expands endless stream when cursor repeats and recovers guest gate`() = runTest {
+        val feedJson = """
+            {
+              "code": 0,
+              "msg": "success",
+              "data": [
+                {"video_id": "101", "title": "Clip 1", "play": "https://cdn.example/101.mp4", "author": {"unique_id": "a1"}},
+                {"video_id": "102", "title": "Clip 2", "play": "https://cdn.example/102.mp4", "author": {"unique_id": "a2"}}
+              ]
+            }
+        """.trimIndent()
+        val aiSearchJson = """
+            {
+              "code": 0,
+              "msg": "success",
+              "data": {
+                "videos": [
+                  {"video_id": "901", "title": "AI Curated 1", "play": "https://cdn.example/901.mp4", "author": {"unique_id": "ai1"}},
+                  {"video_id": "902", "title": "AI Curated 2", "play": "https://cdn.example/902.mp4", "author": {"unique_id": "ai2"}}
+                ]
+              }
+            }
+        """.trimIndent()
+
+        val client = PrivacyPolicyEnforcer.createPrivacyOkHttpClient()
+            .newBuilder()
+            .addInterceptor(Interceptor { chain ->
+                val url = chain.request().url.toString()
+                val body = if (url.contains("keywords=kuliner")) aiSearchJson else feedJson
+                Response.Builder()
+                    .request(chain.request())
+                    .protocol(Protocol.HTTP_1_1)
+                    .code(200)
+                    .message("OK")
+                    .body(body.toResponseBody("application/json".toMediaType()))
+                    .build()
+            })
+            .build()
+
+        val moshi = Moshi.Builder().addLast(KotlinJsonAdapterFactory()).build()
+        val tikWmProvider = com.gendev.tiktokviewer.data.provider.TikWmPublicProvider(client, moshi, ioDispatcher = testDispatcher)
+        val oEmbedService = object : TikTokOEmbedService {
+            override suspend fun getOEmbed(videoUrl: String): retrofit2.Response<com.gendev.tiktokviewer.data.remote.dto.TikTokOEmbedDto> {
+                return retrofit2.Response.error(404, "unused".toResponseBody("text/plain".toMediaType()))
+            }
+        }
+        val oEmbedProvider = TikTokOEmbedVideoProvider(oEmbedService, client, testDispatcher)
+        val publicAdapter = TikTokPublicContentAdapter(oEmbedProvider, client, testDispatcher)
+        val fallbackManager = TikTokFallbackManagerImpl(client, RetryBackoffPolicy(maxAttempts = 1, delayFn = {}))
+        val repository = HybridTikTokRepository(
+            cache = EphemeralMetadataCache(),
+            okHttpClient = client,
+            fallbackManager = fallbackManager,
+            tikWmProvider = tikWmProvider,
+            proxiTokInstances = emptyList(),
+            oEmbedVideoProvider = oEmbedProvider,
+            publicContentAdapter = publicAdapter,
+            playbackProvider = TikTokPlaybackProviderImpl(),
+            selfHostedFactory = { url ->
+                ProxiTokProvider("self", url, "Self", VideoSourceKind.PROXITOK_SELF_HOSTED, client, testDispatcher)
+            },
+            ioDispatcher = testDispatcher
+        )
+
+        val aiAssistant = object : GeminiScrollAssistant {
+            override suspend fun buildVibeDiscovery(userMoodOrTopic: String) =
+                AiVibeSuggestion("Kuliner", "kuliner", listOf("kuliner"), "kuliner")
+
+            override fun streamVideoInsight(video: PublicVideo) =
+                flowOf(AiVideoInsightState.Ready("OK"))
+
+            override suspend fun generateEndlessStreamQueries(seenQueries: List<String>, currentTopic: String) =
+                listOf("kuliner", "alam")
+        }
+
+        val vm = ViewerViewModel(repository, aiAssistant)
+        advanceUntilIdle()
+        val initial = vm.feedState.value as FeedUiState.Ready
+        assertEquals(2, initial.videos.size)
+
+        // Page 1 returns duplicate IDs from feedJson, so AI assistant immediately supplies fresh "kuliner" stream videos
+        vm.onPageSelected(1)
+        advanceUntilIdle()
+        val expanded = vm.feedState.value as FeedUiState.Ready
+        assertTrue(expanded.videos.any { it.id == "901" })
+
+        // If Guest Scroll ever triggers gate detection while stream is available, it upgrades right back to NATIVE_STREAM
+        vm.openGuestScroll("#FYP")
+        assertEquals(ViewerEngineMode.GUEST_SCROLL, vm.viewerEngineMode.value)
+        vm.handleGuestGateDetected()
+        advanceUntilIdle()
+        assertEquals(ViewerEngineMode.NATIVE_STREAM, vm.viewerEngineMode.value)
     }
 }

@@ -142,6 +142,12 @@ class ViewerViewModel(
     private var insightJob: Job? = null
     private var nextFeedCursor: String? = "1"
     private var isLoadingMoreFeed = false
+    private val seenAiQueries = mutableListOf<String>()
+    private val aiTopicQueue = ArrayDeque<String>()
+    private val fallbackDiscoveryTopics = listOf(
+        "hiburan", "komedi", "kuliner", "musik", "hewanlucu",
+        "alam", "olahraga", "teknologi", "otomotif", "travel"
+    )
 
     init {
         if (!startInUnifiedScroll) {
@@ -215,19 +221,37 @@ class ViewerViewModel(
         _isSettingsOpen.value = false
         _isPaused.value = false
         if (_viewerEngineMode.value == ViewerEngineMode.GUEST_SCROLL) {
-            val toggledGuestUrl = if (_guestUrl.value.contains("/foryou", ignoreCase = true)) {
+            val fallbackToggledGuestUrl = if (_guestUrl.value.contains("/foryou", ignoreCase = true)) {
                 "https://www.tiktok.com/explore"
             } else {
                 "https://www.tiktok.com/foryou"
             }
             viewModelScope.launch {
-                val upgrade = withTimeoutOrNull(2_500L) {
+                val upgrade = withTimeoutOrNull(4_000L) {
                     repository.loadPublicFeed(forceRefresh = true)
                 }
                 if (upgrade is ProviderResult.Success && upgrade.data.videos.isNotEmpty()) {
                     applyFeedResult(upgrade, autoFallbackToGuestOnFailure = false)
+                    return@launch
+                }
+                val aiBatch = if (aiAssistant != null) {
+                    fetchAiEndlessBatch()
                 } else {
-                    _guestUrl.value = toggledGuestUrl
+                    null
+                }
+                if (aiBatch is ProviderResult.Success && aiBatch.data.videos.isNotEmpty()) {
+                    applyFeedResult(aiBatch, autoFallbackToGuestOnFailure = false)
+                } else {
+                    val aiTag = if (aiAssistant != null) {
+                        popNextAiTopic()?.replace(Regex("[^A-Za-z0-9_]"), "")?.takeIf { it.isNotBlank() }
+                    } else {
+                        null
+                    }
+                    _guestUrl.value = if (aiTag != null) {
+                        "https://www.tiktok.com/tag/$aiTag"
+                    } else {
+                        fallbackToggledGuestUrl
+                    }
                     _guestReloadToken.value += 1
                     _viewerEngineMode.value = ViewerEngineMode.GUEST_SCROLL
                 }
@@ -238,34 +262,69 @@ class ViewerViewModel(
         val cursor = nextFeedCursor ?: "1"
         viewModelScope.launch {
             _feedState.value = FeedUiState.Loading("Memuat video baru...")
-            val res = withTimeoutOrNull(4_500L) {
+            val res = withTimeoutOrNull(8_000L) {
                 repository.loadMorePublicFeed(cursor)
             }
             if (res is ProviderResult.Success && res.data.videos.isNotEmpty()) {
                 applyFeedResult(res, autoFallbackToGuestOnFailure = true)
-            } else {
-                nextFeedCursor = ((cursor.toIntOrNull() ?: 1) + 1).toString()
-                val fallbackRes = withTimeoutOrNull(4_200L) {
-                    repository.loadPublicFeed(forceRefresh = true)
-                }
-                if (fallbackRes == null) {
-                    activateSeamlessGuestFallback("Beralih cepat ke Mode Scroll Tanpa Login")
-                } else {
-                    applyFeedResult(fallbackRes, autoFallbackToGuestOnFailure = true)
-                }
+                return@launch
             }
+            nextFeedCursor = ((cursor.toIntOrNull() ?: 1) + 1).toString()
+            val aiBatch = fetchAiEndlessBatch()
+            if (aiBatch is ProviderResult.Success && aiBatch.data.videos.isNotEmpty()) {
+                applyFeedResult(aiBatch, autoFallbackToGuestOnFailure = true)
+                return@launch
+            }
+            val fallbackRes = withTimeoutOrNull(8_000L) {
+                repository.loadPublicFeed(forceRefresh = true)
+            }
+            if (fallbackRes == null) {
+                activateSeamlessGuestFallback("Beralih ke TikTok Web Tanpa Login")
+            } else {
+                applyFeedResult(fallbackRes, autoFallbackToGuestOnFailure = true)
+            }
+        }
+    }
+
+    fun handleGuestGateDetected() {
+        viewModelScope.launch {
+            val streamUpgrade = withTimeoutOrNull(4_500L) {
+                repository.loadPublicFeed(forceRefresh = true)
+            }
+            if (streamUpgrade is ProviderResult.Success && streamUpgrade.data.videos.isNotEmpty()) {
+                applyFeedResult(streamUpgrade, autoFallbackToGuestOnFailure = false)
+                return@launch
+            }
+            val aiTag = popNextAiTopic()?.replace(Regex("[^A-Za-z0-9_]"), "")?.takeIf { it.isNotBlank() }
+            val nextUrl = if (aiTag != null) {
+                "https://www.tiktok.com/tag/$aiTag"
+            } else if (_guestUrl.value.contains("/explore", ignoreCase = true)) {
+                "https://www.tiktok.com/tag/fyp"
+            } else {
+                "https://www.tiktok.com/explore"
+            }
+            _guestUrl.value = nextUrl
+            _guestReloadToken.value += 1
+            _viewerEngineMode.value = ViewerEngineMode.GUEST_SCROLL
         }
     }
 
     fun loadFeed(forceRefresh: Boolean = false) {
         viewModelScope.launch {
             _isPaused.value = false
-            _feedState.value = FeedUiState.Loading("Memuat video...")
-            val res = withTimeoutOrNull(4_200L) {
+            _feedState.value = FeedUiState.Loading("Memuat stream video...")
+            val res = withTimeoutOrNull(12_000L) {
                 repository.loadPublicFeed(forceRefresh)
             }
-            if (res == null) {
-                activateSeamlessGuestFallback("Beralih cepat ke Mode Scroll Tanpa Login")
+            if (res is ProviderResult.Success && res.data.videos.isNotEmpty()) {
+                applyFeedResult(res, autoFallbackToGuestOnFailure = true)
+                return@launch
+            }
+            val aiBatch = if (aiAssistant != null) fetchAiEndlessBatch() else null
+            if (aiBatch is ProviderResult.Success && aiBatch.data.videos.isNotEmpty()) {
+                applyFeedResult(aiBatch, autoFallbackToGuestOnFailure = true)
+            } else if (res == null) {
+                activateSeamlessGuestFallback("Beralih ke TikTok Web Tanpa Login")
             } else {
                 applyFeedResult(res, autoFallbackToGuestOnFailure = true)
             }
@@ -385,6 +444,7 @@ class ViewerViewModel(
         isLoadingMoreFeed = true
         viewModelScope.launch {
             try {
+                var appended = false
                 when (val res = repository.loadMorePublicFeed(currentCursor)) {
                     is ProviderResult.Success -> {
                         val currentReady = _feedState.value as? FeedUiState.Ready ?: return@launch
@@ -395,16 +455,65 @@ class ViewerViewModel(
                             _feedState.value = currentReady.copy(
                                 videos = currentReady.videos + fresh
                             )
+                            appended = true
                         }
                     }
                     else -> {
                         nextFeedCursor = ((currentCursor.toIntOrNull() ?: 1) + 1).toString()
                     }
                 }
+
+                // If cursor yielded duplicates or rate-limit/error, seamlessly expand via Gemini AI curation
+                if (!appended) {
+                    val aiBatch = fetchAiEndlessBatch()
+                    if (aiBatch is ProviderResult.Success) {
+                        val currentReady = _feedState.value as? FeedUiState.Ready ?: return@launch
+                        val existingIds = currentReady.videos.mapTo(HashSet()) { it.id }
+                        val freshAi = aiBatch.data.videos.filter { it.id !in existingIds }
+                        if (freshAi.isNotEmpty()) {
+                            _feedState.value = currentReady.copy(
+                                videos = currentReady.videos + freshAi,
+                                noticeMessage = aiBatch.data.noticeMessage ?: currentReady.noticeMessage
+                            )
+                        }
+                    }
+                }
             } finally {
                 isLoadingMoreFeed = false
             }
         }
+    }
+
+    private suspend fun popNextAiTopic(): String? {
+        if (aiTopicQueue.isEmpty()) {
+            val generated = runCatching {
+                aiAssistant?.generateEndlessStreamQueries(seenAiQueries, _selectedTopic.value)
+            }.getOrNull().orEmpty()
+            val candidates = generated.ifEmpty {
+                val seenLower = seenAiQueries.mapTo(HashSet()) { it.lowercase() }
+                fallbackDiscoveryTopics.filter { it.lowercase() !in seenLower }
+            }
+            candidates.forEach { topic ->
+                if (topic.isNotBlank()) aiTopicQueue.addLast(topic)
+            }
+        }
+        val next = if (aiTopicQueue.isNotEmpty()) aiTopicQueue.removeFirst() else null
+        if (next != null) {
+            seenAiQueries.add(next)
+        }
+        return next
+    }
+
+    private suspend fun fetchAiEndlessBatch(): ProviderResult<FeedPage> {
+        val batchQueries = buildList {
+            repeat(2) {
+                popNextAiTopic()?.let { add(it) }
+            }
+        }
+        if (batchQueries.isEmpty()) {
+            return ProviderResult.ContentUnavailable("No more discovery topics.")
+        }
+        return repository.loadAiCuratedStreamBatch(batchQueries)
     }
 
     fun toggleMute() {

@@ -130,7 +130,8 @@ class TikTokOEmbedVideoProvider(
 class TikTokPublicContentAdapter(
     private val oEmbedVideoProvider: TikTokOEmbedVideoProvider,
     private val okHttpClient: OkHttpClient,
-    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO
+    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+    private val directStreamEnricher: (suspend (String) -> PublicVideo?)? = null
 ) : TikTokFeedProvider, TikTokSearchProvider {
 
     override val providerId: String = "tiktok_public_adapter"
@@ -147,7 +148,7 @@ class TikTokPublicContentAdapter(
     override suspend fun fetchTrendingFeed(cursor: String?): ProviderResult<FeedPage> = coroutineScope {
         val resolved = verifiedPublicChannels.map { url ->
             async {
-                when (val res = oEmbedVideoProvider.resolveVideoByUrlOrId(url)) {
+                directStreamEnricher?.invoke(url) ?: when (val res = oEmbedVideoProvider.resolveVideoByUrlOrId(url)) {
                     is ProviderResult.Success -> res.data
                     else -> null
                 }
@@ -270,7 +271,7 @@ class TikTokPublicContentAdapter(
 
             val enriched = videoUrls.map { url ->
                 async {
-                    when (val r = oEmbedVideoProvider.resolveVideoByUrlOrId(url)) {
+                    directStreamEnricher?.invoke(url) ?: when (val r = oEmbedVideoProvider.resolveVideoByUrlOrId(url)) {
                         is ProviderResult.Success -> r.data
                         else -> null
                     }

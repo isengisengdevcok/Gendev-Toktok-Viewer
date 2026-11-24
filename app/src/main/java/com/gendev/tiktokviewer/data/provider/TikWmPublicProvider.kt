@@ -67,7 +67,7 @@ class TikWmPublicProvider(
         if (pageNum > 0) {
             val topic = infiniteFeedTopics[(pageNum - 1) % infiniteFeedTopics.size]
             val searchCursor = ((pageNum - 1) / infiniteFeedTopics.size) * 15
-            val pagedUrl = "$normalizedBase/api/feed/search?keywords=${encode(topic)}&count=15&cursor=$searchCursor&hd=1"
+            val pagedUrl = "$normalizedBase/api/feed/search?keywords=${encode(topic)}&count=15&cursor=$searchCursor"
             return@withContext when (val raw = executeJsonGet(pagedUrl)) {
                 is JsonFetchResult.Success -> {
                     val parsed = runCatching { searchAdapter.fromJson(raw.body) }.getOrNull()
@@ -91,45 +91,54 @@ class TikWmPublicProvider(
             }
         }
 
-        val region = "ID"
-        val url = "$normalizedBase/api/feed/list?region=$region&count=15"
-        when (val raw = executeJsonGet(url)) {
-            is JsonFetchResult.Success -> {
-                val parsed = runCatching { feedAdapter.fromJson(raw.body) }.getOrNull()
-                if (parsed?.code == 0 && !parsed.data.isNullOrEmpty()) {
-                    val videos = parsed.data.mapNotNull { it.toDomain() }
-                    if (videos.isNotEmpty()) {
-                        return@withContext ProviderResult.Success(
-                            data = FeedPage(
-                                videos = videos,
-                                nextCursor = "1",
+        val regions = listOf("ID", "US", "SG")
+        var lastFailure: ProviderResult<Nothing>? = null
+        for (region in regions) {
+            val url = "$normalizedBase/api/feed/list?region=$region&count=15"
+            when (val raw = executeJsonGet(url)) {
+                is JsonFetchResult.Success -> {
+                    val parsed = runCatching { feedAdapter.fromJson(raw.body) }.getOrNull()
+                    if (parsed?.code == 0 && !parsed.data.isNullOrEmpty()) {
+                        val videos = parsed.data.mapNotNull { it.toDomain() }
+                        if (videos.isNotEmpty()) {
+                            return@withContext ProviderResult.Success(
+                                data = FeedPage(
+                                    videos = videos,
+                                    nextCursor = "1",
+                                    sourceKind = sourceKind,
+                                    sourceEndpoint = displayLabel
+                                ),
                                 sourceKind = sourceKind,
-                                sourceEndpoint = displayLabel
-                            ),
-                            sourceKind = sourceKind,
-                            endpoint = displayLabel
-                        )
+                                endpoint = displayLabel
+                            )
+                        }
                     }
                 }
-                // Fallback to search "fyp" if regional feed list is empty or throttled
-                when (val fypFallback = searchVideos("fyp")) {
-                    is ProviderResult.Success -> ProviderResult.Success(
-                        data = FeedPage(
-                            videos = fypFallback.data,
-                            nextCursor = "1",
-                            sourceKind = sourceKind,
-                            sourceEndpoint = displayLabel
-                        ),
-                        sourceKind = sourceKind,
-                        endpoint = displayLabel
-                    )
-                    is ProviderResult.RateLimited -> fypFallback
-                    is ProviderResult.AccessRestricted -> fypFallback
-                    is ProviderResult.NetworkError -> fypFallback
-                    is ProviderResult.ContentUnavailable -> fypFallback
+                is JsonFetchResult.Failure -> {
+                    lastFailure = raw.result
+                    if (raw.result is ProviderResult.RateLimited || raw.result is ProviderResult.AccessRestricted) {
+                        break
+                    }
                 }
             }
-            is JsonFetchResult.Failure -> raw.result
+        }
+
+        // Fallback to search "fyp" if regional feed list is empty or throttled
+        when (val fypFallback = searchVideos("fyp")) {
+            is ProviderResult.Success -> ProviderResult.Success(
+                data = FeedPage(
+                    videos = fypFallback.data,
+                    nextCursor = "1",
+                    sourceKind = sourceKind,
+                    sourceEndpoint = displayLabel
+                ),
+                sourceKind = sourceKind,
+                endpoint = displayLabel
+            )
+            is ProviderResult.RateLimited -> fypFallback
+            is ProviderResult.AccessRestricted -> fypFallback
+            is ProviderResult.NetworkError -> lastFailure ?: fypFallback
+            is ProviderResult.ContentUnavailable -> lastFailure ?: fypFallback
         }
     }
 

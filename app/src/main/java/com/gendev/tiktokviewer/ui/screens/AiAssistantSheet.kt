@@ -282,7 +282,7 @@ fun AiAssistantSheet(
                                     color = NeonViolet
                                 )
                                 Button(
-                                    onClick = { onApplyVibeToGuestScroll(suggestion) },
+                                    onClick = { onApplyVibeToStream(suggestion) },
                                     colors = ButtonDefaults.buttonColors(
                                         containerColor = MaterialTheme.colorScheme.primary,
                                         contentColor = PureWhite
@@ -290,6 +290,7 @@ fun AiAssistantSheet(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .minimumInteractiveComponentSize()
+                                        .testTag("ai_apply_stream_button")
                                 ) {
                                     Icon(
                                         imageVector = Icons.Rounded.PlayArrow,
@@ -297,7 +298,17 @@ fun AiAssistantSheet(
                                         modifier = Modifier.size(18.dp)
                                     )
                                     Spacer(modifier = Modifier.width(6.dp))
-                                    Text("Buka & Scroll Feed")
+                                    Text("Buka Stream Lancar")
+                                }
+                                OutlinedButton(
+                                    onClick = { onApplyVibeToGuestScroll(suggestion) },
+                                    border = BorderStroke(1.dp, DarkGlassBorder),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .minimumInteractiveComponentSize()
+                                        .testTag("ai_apply_guest_button")
+                                ) {
+                                    Text("Scroll di TikTok Web", color = NeonViolet)
                                 }
                             }
                         }

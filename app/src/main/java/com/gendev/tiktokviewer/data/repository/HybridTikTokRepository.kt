@@ -25,6 +25,7 @@ import com.gendev.tiktokviewer.domain.provider.TikTokFallbackManager
 import com.gendev.tiktokviewer.domain.provider.TikTokPlaybackProvider
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -45,7 +46,8 @@ class HybridTikTokRepository(
     private val oEmbedVideoProvider: TikTokOEmbedVideoProvider,
     private val publicContentAdapter: TikTokPublicContentAdapter,
     private val playbackProvider: TikTokPlaybackProvider,
-    private val selfHostedFactory: (String) -> ProxiTokProvider
+    private val selfHostedFactory: (String) -> ProxiTokProvider,
+    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO
 ) {
     val streamingOkHttpClient: OkHttpClient = PrivacyPolicyEnforcer.createStreamingOkHttpClient()
 
@@ -95,7 +97,7 @@ class HybridTikTokRepository(
     /**
      * Fetches active community ProxiTok instances directly from pablouser1/ProxiTok GitHub directory.
      */
-    suspend fun refreshCommunityProxiTokDirectory(): Int = withContext(Dispatchers.IO) {
+    suspend fun refreshCommunityProxiTokDirectory(): Int = withContext(ioDispatcher) {
         runCatching {
             val request = Request.Builder()
                 .url("https://raw.githubusercontent.com/pablouser1/ProxiTok/master/instances.json")
@@ -117,7 +119,8 @@ class HybridTikTokRepository(
                             baseUrl = url,
                             displayLabel = "ProxiTok · $host",
                             sourceKind = VideoSourceKind.PROXITOK_PUBLIC,
-                            okHttpClient = okHttpClient
+                            okHttpClient = okHttpClient,
+                            ioDispatcher = ioDispatcher
                         )
                         discovered += provider
                         fallbackManager.registerOrUpdateEndpoint(provider.providerId, provider.displayLabel, provider.sourceKind)
@@ -131,6 +134,9 @@ class HybridTikTokRepository(
             }
         }.getOrDefault(0)
     }
+
+    @Volatile
+    private var hasSyncedCommunityDirectory = false
 
     suspend fun loadPublicFeed(forceRefresh: Boolean = false): ProviderResult<FeedPage> {
         val cacheKey = "trending_public"
@@ -146,7 +152,14 @@ class HybridTikTokRepository(
         }
 
         val attempts = buildFeedAttempts()
-        val result = fallbackManager.executeWithFallback("trending_feed", attempts)
+        var result = fallbackManager.executeWithFallback("trending_feed", attempts)
+        if (result !is ProviderResult.Success && proxiTokInstances.isNotEmpty() && !hasSyncedCommunityDirectory) {
+            hasSyncedCommunityDirectory = true
+            val discovered = refreshCommunityProxiTokDirectory()
+            if (discovered > 0) {
+                result = fallbackManager.executeWithFallback("trending_feed", buildFeedAttempts())
+            }
+        }
         if (result is ProviderResult.Success) {
             cache.putFeed(cacheKey, result.data)
         }
@@ -156,9 +169,46 @@ class HybridTikTokRepository(
     suspend fun loadMorePublicFeed(cursor: String): ProviderResult<FeedPage> {
         val tikWm = tikWmProvider
         if (tikWm != null) {
-            return tikWm.fetchTrendingFeed(cursor = cursor)
+            val res = tikWm.fetchTrendingFeed(cursor = cursor)
+            if (res is ProviderResult.Success && res.data.videos.isNotEmpty()) {
+                return res
+            }
+        }
+        if (proxiTokInstances.isNotEmpty() && !hasSyncedCommunityDirectory) {
+            hasSyncedCommunityDirectory = true
+            refreshCommunityProxiTokDirectory()
         }
         return loadPublicFeed(forceRefresh = true)
+    }
+
+    suspend fun loadAiCuratedStreamBatch(queries: List<String>): ProviderResult<FeedPage> {
+        var lastError: ProviderResult<FeedPage>? = null
+        for (rawQuery in queries) {
+            val query = rawQuery.trim()
+            if (query.isBlank()) continue
+            when (val res = searchPublic(query, SearchMode.KEYWORD)) {
+                is ProviderResult.Success -> {
+                    if (res.data.isNotEmpty()) {
+                        return ProviderResult.Success(
+                            data = FeedPage(
+                                videos = res.data,
+                                sourceKind = res.sourceKind,
+                                sourceEndpoint = "${res.endpoint} · AI",
+                                noticeMessage = "AI Stream · $query"
+                            ),
+                            sourceKind = res.sourceKind,
+                            endpoint = "${res.endpoint} · AI",
+                            fromCache = res.fromCache
+                        )
+                    }
+                }
+                is ProviderResult.RateLimited -> lastError = res
+                is ProviderResult.AccessRestricted -> lastError = res
+                is ProviderResult.NetworkError -> lastError = res
+                is ProviderResult.ContentUnavailable -> lastError = res
+            }
+        }
+        return lastError ?: ProviderResult.ContentUnavailable("No additional AI stream videos available.")
     }
 
     suspend fun loadTopicFeed(topic: String): ProviderResult<FeedPage> {
@@ -459,7 +509,16 @@ class HybridTikTokRepository(
 
             val tikWmProvider = TikWmPublicProvider(okHttp, moshi)
             val oEmbedProvider = TikTokOEmbedVideoProvider(oEmbedService, okHttp)
-            val publicAdapter = TikTokPublicContentAdapter(oEmbedProvider, okHttp)
+            val publicAdapter = TikTokPublicContentAdapter(
+                oEmbedVideoProvider = oEmbedProvider,
+                okHttpClient = okHttp,
+                directStreamEnricher = { videoUrl ->
+                    when (val resolved = tikWmProvider.resolveVideoByUrlOrId(videoUrl)) {
+                        is ProviderResult.Success -> resolved.data
+                        else -> null
+                    }
+                }
+            )
             val fallbackManager = TikTokFallbackManagerImpl(
                 okHttpClient = okHttp,
                 retryPolicy = RetryBackoffPolicy(maxAttempts = 1),

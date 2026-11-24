@@ -6,6 +6,7 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.webkit.CookieManager
+import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
@@ -34,6 +35,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -48,14 +50,19 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.gendev.tiktokviewer.ui.theme.DarkGlassSubtleBorder
 import kotlinx.coroutines.delay
 
-private const val MOBILE_WEB_UA =
-    "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36"
+/**
+ * Desktop Chrome User-Agent prevents TikTok Mobile Web from enforcing the 2-video app-install/login gate,
+ * while injected CSS & touch-swipe bridge keep the portrait full-screen scroll experience inside the app.
+ */
+private const val DESKTOP_WEB_UA =
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 
 /**
- * Lightweight JS/CSS cosmetic cleanup for TikTok Guest Mobile Web:
- * - Preserves TikTok's native touch-swipe & scroll-snap feed container (never overrides touch-action)
- * - Strips TikTok headers, right-side social buttons, bottom black bars, captions, and login/app modals
- *   so ONLY the clean video remains visible without black blocks
+ * JS/CSS cleanup & swipe bridge for TikTok Web without login:
+ * - Strips TikTok navigation sidebars, top headers, comment drawers, social icons, captions, and login modals
+ *   so ONLY the clean full-bleed <video> remains visible without black blocks
+ * - Bridges vertical finger swipes to TikTok's feed scroller & ArrowDown/ArrowUp / next-video controls
+ * - Detects guest locks (non-CAPTCHA login walls or stuck video) and notifies GendevGuestBridge
  * - Strictly preserves CAPTCHA/security challenges and any container holding a <video>
  */
 private val GUEST_CLEANUP_JS = """
@@ -66,17 +73,20 @@ private val GUEST_CLEANUP_JS = """
           var s = document.createElement('style');
           s.id = styleId;
           s.textContent = [
-            'html, body { background-color: #000000 !important; overscroll-behavior-y: contain; }',
+            'html, body { background-color: #000000 !important; margin: 0 !important; padding: 0 !important; overscroll-behavior-y: contain; }',
             '#login-modal, [data-e2e="login-modal"], [data-e2e="login-guide"],',
             '[class*="DivLoginModal"], [class*="LoginModal"], [class*="DivLoginGuide"],',
             '[class*="AppBanner"], [class*="DownloadApp"], [data-e2e="open-app-button"],',
             '[data-e2e="top-login-button"], [class*="DivSwipeGuide"],',
-            '[data-e2e="like-icon"], [data-e2e="comment-icon"], [data-e2e="share-icon"],',
+            '[class*="SideNav"], [class*="DivLeftContainer"], [class*="LeftSidebar"], [data-e2e="nav-foryou"], [data-e2e="nav-following"],',
+            '[class*="DivCommentContainer"], [data-e2e="comment-list"], [class*="CommentList"],',
+            '[data-e2e="like-icon"], [data-e2e="comment-icon"], [data-e2e="share-icon"], [data-e2e="collect-icon"],',
             '[data-e2e="browse-like-icon"], [data-e2e="browse-comment-icon"],',
             '[data-e2e="video-desc"], [data-e2e="browse-video-desc"], [data-e2e="browse-music"],',
             '[data-e2e="video-author-uniqueid"], [data-e2e="user-avatar"] {',
             '  display: none !important; visibility: hidden !important; pointer-events: none !important;',
-            '}'
+            '}',
+            'video { object-fit: cover !important; background-color: #000000 !important; }'
           ].join(' ');
           (document.head || document.documentElement).appendChild(s);
         }
@@ -102,7 +112,7 @@ private val GUEST_CLEANUP_JS = """
         function isProtectedRoot(el) {
           if (!el) return true;
           if (el === document.documentElement || el === document.body) return true;
-          if (el.id === 'app' || el.id === 'main') return true;
+          if (el.id === 'app' || el.id === 'main' || el.id === 'main-content-homepage_hot') return true;
           if (el.tagName === 'VIDEO') return true;
           if (el.querySelector && el.querySelector('video')) return true;
           return isCaptchaNode(el);
@@ -152,12 +162,14 @@ private val GUEST_CLEANUP_JS = """
               }
             }
 
-            // Strip TikTok chrome (headers, bottom black bars, side social action bars, captions)
+            // Strip TikTok chrome (headers, desktop side nav, bottom black bars, side social action bars, captions)
             var chromeNodes = document.querySelectorAll(
               'header, footer, nav, ' +
               '[class*="DivHeader"], [class*="HeaderContainer"], [class*="TopBar"], ' +
+              '[class*="SideNav"], [class*="DivLeftContainer"], [class*="LeftSidebar"], ' +
               '[class*="BottomBar"], [class*="TabBar"], [class*="DivFooter"], [class*="DivBottomContainer"], ' +
               '[class*="ActionBar"], [class*="DivActionItem"], [class*="DivSideBar"], [class*="SideBar"], ' +
+              '[class*="DivComment"], [class*="CommentList"], ' +
               '[class*="DivVideoInfo"], [class*="VideoInfo"], [class*="DivMusic"], [class*="DivDescription"], ' +
               '[class*="OpenApp"], [class*="AppBanner"], [class*="DownloadApp"]'
             );
@@ -203,7 +215,7 @@ private val GUEST_CLEANUP_JS = """
               }
             }
 
-            // Hide any opaque dark/black fixed bottom/edge bars without <video> (e.g. "Open app" / nav dock)
+            // Hide any opaque dark/black fixed bottom/edge bars without <video>
             var fixedEls = document.querySelectorAll('div, section, aside');
             for (var f = 0; f < fixedEls.length; f++) {
               var fel = fixedEls[f];
@@ -217,6 +229,18 @@ private val GUEST_CLEANUP_JS = """
               if (isOpaqueBg && rect && rect.height > 0 && rect.height <= window.innerHeight * 0.45) {
                 hideNode(fel);
                 removedModal = true;
+              }
+            }
+
+            // Expand main video containers cleanly to full width on phone portrait screens
+            var videos = document.querySelectorAll('video');
+            for (var v = 0; v < videos.length; v++) {
+              var vid = videos[v];
+              vid.style.setProperty('object-fit', 'cover', 'important');
+              var p = vid.parentElement;
+              for (var depth = 0; depth < 3 && p && p !== document.body; depth++) {
+                p.style.setProperty('max-width', '100vw', 'important');
+                p = p.parentElement;
               }
             }
 
@@ -239,10 +263,41 @@ private val GUEST_CLEANUP_JS = """
           } catch (e) {}
         }
 
+        function getActiveVideoSignature() {
+          var videos = document.querySelectorAll('video');
+          var vh = window.innerHeight || 800;
+          for (var i = 0; i < videos.length; i++) {
+            var r = videos[i].getBoundingClientRect();
+            if (r.height > 80 && r.top < vh * 0.7 && r.bottom > vh * 0.3) {
+              return (videos[i].currentSrc || videos[i].src || '') + '#' + i;
+            }
+          }
+          return videos.length > 0 ? (videos[0].currentSrc || videos[0].src || '') : '';
+        }
+
+        function triggerNextOrPrev(isNext) {
+          var sel = isNext
+            ? '[data-e2e="arrow-right"], button[aria-label*="next" i], button[aria-label*="berikutnya" i], button[data-e2e*="down"]'
+            : '[data-e2e="arrow-left"], button[aria-label*="previous" i], button[aria-label*="sebelumnya" i], button[data-e2e*="up"]';
+          var btn = document.querySelector(sel);
+          if (btn && btn.offsetParent !== null) {
+            btn.click();
+          }
+          var key = isNext ? 'ArrowDown' : 'ArrowUp';
+          var code = isNext ? 40 : 38;
+          var evt = new KeyboardEvent('keydown', { key: key, code: key, keyCode: code, which: code, bubbles: true, cancelable: true });
+          (document.activeElement || document.body || document).dispatchEvent(evt);
+          window.dispatchEvent(evt);
+          try {
+            window.scrollBy({ top: isNext ? window.innerHeight * 0.92 : -window.innerHeight * 0.92, behavior: 'smooth' });
+          } catch (e) {}
+        }
+
         unlockGuestScroll();
 
         if (!window.__gendevGuestObserverAttached) {
           window.__gendevGuestObserverAttached = true;
+          window.__gendevStuckSwipes = 0;
           var scheduled = false;
           var observer = new MutationObserver(function() {
             if (scheduled) return;
@@ -260,17 +315,66 @@ private val GUEST_CLEANUP_JS = """
               attributeFilter: ['style', 'class']
             });
           }
-          window.addEventListener('touchend', function() {
-            setTimeout(unlockGuestScroll, 180);
+
+          var touchStartY = 0;
+          var touchStartX = 0;
+          var preSwipeSig = '';
+          window.addEventListener('touchstart', function(e) {
+            if (e.touches && e.touches.length > 0) {
+              touchStartY = e.touches[0].clientY;
+              touchStartX = e.touches[0].clientX;
+              preSwipeSig = getActiveVideoSignature();
+            }
+          }, { passive: true });
+
+          window.addEventListener('touchend', function(e) {
+            setTimeout(unlockGuestScroll, 150);
+            if (!e.changedTouches || e.changedTouches.length === 0) return;
+            var dy = touchStartY - e.changedTouches[0].clientY;
+            var dx = touchStartX - e.changedTouches[0].clientX;
+            if (Math.abs(dy) > 46 && Math.abs(dy) > Math.abs(dx)) {
+              var isNext = dy > 0;
+              setTimeout(function() {
+                var afterSig = getActiveVideoSignature();
+                if (preSwipeSig && afterSig === preSwipeSig) {
+                  triggerNextOrPrev(isNext);
+                }
+              }, 140);
+
+              if (isNext) {
+                setTimeout(function() {
+                  var finalSig = getActiveVideoSignature();
+                  if (!hasVisibleCaptcha() && preSwipeSig && finalSig === preSwipeSig) {
+                    window.__gendevStuckSwipes = (window.__gendevStuckSwipes || 0) + 1;
+                    if (window.__gendevStuckSwipes >= 2 && window.GendevGuestBridge && window.GendevGuestBridge.onGuestGateDetected) {
+                      window.__gendevStuckSwipes = 0;
+                      window.GendevGuestBridge.onGuestGateDetected();
+                    }
+                  } else {
+                    window.__gendevStuckSwipes = 0;
+                  }
+                }, 900);
+              }
+            }
           }, { passive: true });
         }
       } catch (e) {}
     })();
 """.trimIndent()
 
+private class GendevGuestJsBridge(
+    private val onGateDetected: () -> Unit
+) {
+    @JavascriptInterface
+    fun onGuestGateDetected() {
+        onGateDetected()
+    }
+}
+
 /**
- * Lightweight, login-free TikTok Guest Scroll player.
- * Lets users scroll public TikTok feeds directly without accounts, login screens, or app-store redirects.
+ * Lightweight, login-free TikTok Web scroll player.
+ * Uses Desktop Chrome UA + touch-to-feed swipe bridge + DOM cleanup so users can scroll public TikTok
+ * feeds without login or 2-video mobile app-banner lockouts.
  */
 @SuppressLint("SetJavaScriptEnabled", "ClickableViewAccessibility")
 @Composable
@@ -279,17 +383,20 @@ fun TikTokGuestScrollPlayer(
     isPaused: Boolean,
     isMuted: Boolean,
     reloadToken: Int,
+    onGuestGateDetected: (() -> Unit)? = null,
     onBackHandled: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
+    val latestGateCallback by rememberUpdatedState(onGuestGateDetected)
 
     var loadProgress by remember { mutableIntStateOf(10) }
     var isInitialLoading by remember { mutableStateOf(true) }
     var canGoBack by remember { mutableStateOf(false) }
 
     val webView = remember {
+        var lastGateNotifyMs = 0L
         WebView(context).apply {
             setBackgroundColor(AndroidColor.BLACK)
             setLayerType(View.LAYER_TYPE_NONE, null)
@@ -301,6 +408,23 @@ fun TikTokGuestScrollPlayer(
             layoutParams = ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT
+            )
+
+            addJavascriptInterface(
+                GendevGuestJsBridge {
+                    val now = System.currentTimeMillis()
+                    if (now - lastGateNotifyMs > 5_000L) {
+                        lastGateNotifyMs = now
+                        post {
+                            runCatching {
+                                CookieManager.getInstance().removeAllCookies(null)
+                                WebStorage.getInstance().deleteAllData()
+                            }
+                            latestGateCallback?.invoke()
+                        }
+                    }
+                },
+                "GendevGuestBridge"
             )
 
             setOnTouchListener { v, event ->
@@ -337,7 +461,7 @@ fun TikTokGuestScrollPlayer(
                 builtInZoomControls = false
                 displayZoomControls = false
                 setSupportMultipleWindows(false)
-                userAgentString = MOBILE_WEB_UA
+                userAgentString = DESKTOP_WEB_UA
             }
 
             webChromeClient = object : WebChromeClient() {
@@ -372,6 +496,13 @@ fun TikTokGuestScrollPlayer(
                         path.contains("/passport")
                     ) {
                         view?.evaluateJavascript(GUEST_CLEANUP_JS, null)
+                        if (request.isForMainFrame) {
+                            val now = System.currentTimeMillis()
+                            if (now - lastGateNotifyMs > 5_000L) {
+                                lastGateNotifyMs = now
+                                view?.post { latestGateCallback?.invoke() }
+                            }
+                        }
                         return true
                     }
 

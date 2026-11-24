@@ -76,6 +76,7 @@ fun ViewerFeedScreen(
     onRetry: () -> Unit,
     onSwitchSource: () -> Unit,
     onFallbackToEmbed: (videoId: String, reason: String) -> Unit,
+    onGuestGateDetected: () -> Unit = {},
     viewerEngineMode: ViewerEngineMode = ViewerEngineMode.GUEST_SCROLL,
     guestUrl: String = "https://www.tiktok.com/foryou",
     guestReloadToken: Int = 0,
@@ -106,6 +107,7 @@ fun ViewerFeedScreen(
                     isPaused = isPaused,
                     isMuted = isMuted,
                     reloadToken = guestReloadToken,
+                    onGuestGateDetected = onGuestGateDetected,
                     modifier = Modifier.fillMaxSize()
                 )
 
