@@ -143,7 +143,7 @@ fun GendevViewerApp(viewModel: ViewerViewModel) {
                 onToggleUltraCleanMode = { enabled -> viewModel.setUltraCleanMode(enabled, context) },
                 onOpenSearch = viewModel::openSearch,
                 onOpenAiAssistant = viewModel::openAiSheet,
-                onReloadFeed = { viewModel.openGuestScroll("#FYP") },
+                onReloadFeed = viewModel::reloadUnifiedFeed,
                 onWipeCache = { viewModel.wipeEphemeralCache(context) },
                 onOpenAdvancedStatus = viewModel::openResilienceSheet,
                 onClose = {

@@ -29,7 +29,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -41,12 +40,9 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.R
 import com.gendev.tiktokviewer.domain.model.PlaybackMode
@@ -57,8 +53,6 @@ import com.gendev.tiktokviewer.ui.components.ambientObsidianAura
 import com.gendev.tiktokviewer.ui.player.ExoVideoPlayer
 import com.gendev.tiktokviewer.ui.player.IsolatedEmbedPlayer
 import com.gendev.tiktokviewer.ui.player.TikTokGuestScrollPlayer
-import com.gendev.tiktokviewer.ui.theme.DarkGlassSubtleBorder
-import com.gendev.tiktokviewer.ui.theme.PureWhite
 import com.gendev.tiktokviewer.ui.viewmodel.FeedUiState
 import com.gendev.tiktokviewer.ui.viewmodel.ViewerEngineMode
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -185,7 +179,7 @@ fun ViewerFeedScreen(
 
                             VerticalPager(
                                 state = pagerState,
-                                beyondViewportPageCount = 0,
+                                beyondViewportPageCount = 1,
                                 modifier = Modifier
                                     .fillMaxSize()
                                     .testTag("vertical_video_pager")
@@ -211,7 +205,7 @@ fun ViewerFeedScreen(
                     ultraCleanMode = ultraCleanMode,
                     isPaused = isPaused,
                     isMuted = isMuted,
-                    showBackToFeed = true,
+                    showBackToFeed = false,
                     onTogglePlayPause = onTogglePlayPause,
                     onToggleMute = onToggleMute,
                     onBackToFeed = onReturnToUnifiedScroll,
@@ -249,8 +243,8 @@ private fun MinimalCornerControls(
                     icon = Icons.Rounded.DynamicFeed,
                     contentDescription = "Kembali ke Feed Scroll",
                     onClick = onBackToFeed,
-                    sizeDp = 42,
-                    alpha = 0.42f,
+                    sizeDp = 40,
+                    alpha = 0.24f,
                     testTagName = "back_to_scroll_button"
                 )
             }
@@ -259,8 +253,8 @@ private fun MinimalCornerControls(
                 contentDescription = if (isPaused) "Play video" else "Pause video",
                 onClick = onTogglePlayPause,
                 isHighlighted = isPaused,
-                sizeDp = 42,
-                alpha = 0.42f,
+                sizeDp = 40,
+                alpha = 0.24f,
                 testTagName = "play_pause_button"
             )
             GlassIconButton(
@@ -268,8 +262,8 @@ private fun MinimalCornerControls(
                 contentDescription = stringResource(R.string.mute_cd),
                 onClick = onToggleMute,
                 isHighlighted = isMuted,
-                sizeDp = 42,
-                alpha = 0.42f,
+                sizeDp = 40,
+                alpha = 0.24f,
                 testTagName = "mute_toggle_button"
             )
         }
@@ -277,8 +271,8 @@ private fun MinimalCornerControls(
             icon = Icons.Rounded.Tune,
             contentDescription = stringResource(R.string.settings_cd),
             onClick = onOpenSettings,
-            sizeDp = if (ultraCleanMode) 38 else 42,
-            alpha = if (ultraCleanMode) 0.30f else 0.44f,
+            sizeDp = if (ultraCleanMode) 36 else 40,
+            alpha = if (ultraCleanMode) 0.18f else 0.26f,
             testTagName = "open_settings_button"
         )
     }
@@ -375,47 +369,19 @@ private fun CleanStreamVideoPage(
             )
         }
 
-        if (!ultraCleanMode) {
-            Column(
+        if (!ultraCleanMode && video.playbackMode == PlaybackMode.EXO_DIRECT_STREAM) {
+            LinearProgressIndicator(
+                progress = { playbackProgress },
+                color = MaterialTheme.colorScheme.secondary.copy(alpha = 0.85f),
+                trackColor = Color.White.copy(alpha = 0.10f),
                 modifier = Modifier
                     .fillMaxWidth()
                     .align(Alignment.BottomCenter)
-                    .background(
-                        Brush.verticalGradient(
-                            colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.65f))
-                        )
-                    )
                     .navigationBarsPadding()
-                    .padding(start = 16.dp, end = 72.dp, top = 24.dp, bottom = 14.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                Text(
-                    text = "@${video.authorHandle}",
-                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                    color = PureWhite
-                )
-                if (video.title.isNotBlank()) {
-                    Text(
-                        text = video.title,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = PureWhite.copy(alpha = 0.88f),
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-                if (video.playbackMode == PlaybackMode.EXO_DIRECT_STREAM) {
-                    LinearProgressIndicator(
-                        progress = { playbackProgress },
-                        color = MaterialTheme.colorScheme.secondary,
-                        trackColor = DarkGlassSubtleBorder,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(2.5.dp)
-                            .clip(RoundedCornerShape(50))
-                            .testTag("video_progress_bar")
-                    )
-                }
-            }
+                    .height(2.dp)
+                    .clip(RoundedCornerShape(50))
+                    .testTag("video_progress_bar")
+            )
         }
     }
 }

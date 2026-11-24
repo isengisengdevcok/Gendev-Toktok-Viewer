@@ -96,13 +96,14 @@ class GendevComposeUiTest {
         }
 
         composeTestRule.waitForIdle()
-        // Top clutter, tabs, and Scroll/Stream switchers must not be displayed
+        // Top clutter, tabs, caption blocks, and Scroll/Stream switchers must not be displayed
         composeTestRule.onNodeWithText("GENDEV").assertDoesNotExist()
         composeTestRule.onNodeWithText("Scroll").assertDoesNotExist()
         composeTestRule.onNodeWithText("Stream").assertDoesNotExist()
+        composeTestRule.onNodeWithText("@creator_one").assertDoesNotExist()
         composeTestRule.onNodeWithTag("topic_pill_Trending").assertDoesNotExist()
 
-        composeTestRule.onNodeWithText("@creator_one").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("video_page_1001").assertIsDisplayed()
         composeTestRule.onNodeWithTag("open_settings_button").assertIsDisplayed()
         composeTestRule.onNodeWithTag("play_pause_button").assertIsDisplayed()
         composeTestRule.onNodeWithTag("mute_toggle_button").assertIsDisplayed()

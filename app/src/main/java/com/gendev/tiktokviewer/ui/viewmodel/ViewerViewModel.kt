@@ -23,6 +23,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 
 enum class ViewerEngineMode {
     GUEST_SCROLL,
@@ -71,7 +72,7 @@ private const val PREF_ULTRA_CLEAN = "ultra_clean_mode"
 class ViewerViewModel(
     private val repository: HybridTikTokRepository,
     private val aiAssistant: GeminiScrollAssistant? = null,
-    private val startInUnifiedScroll: Boolean = true
+    private val startInUnifiedScroll: Boolean = false
 ) : ViewModel() {
 
     private val _viewerEngineMode = MutableStateFlow(
@@ -79,9 +80,7 @@ class ViewerViewModel(
     )
     val viewerEngineMode: StateFlow<ViewerEngineMode> = _viewerEngineMode.asStateFlow()
 
-    private val _guestUrl = MutableStateFlow(
-        if (startInUnifiedScroll) "https://www.tiktok.com/foryou" else "https://www.tiktok.com/explore"
-    )
+    private val _guestUrl = MutableStateFlow("https://www.tiktok.com/foryou")
     val guestUrl: StateFlow<String> = _guestUrl.asStateFlow()
 
     private val _guestReloadToken = MutableStateFlow(0)
@@ -102,7 +101,7 @@ class ViewerViewModel(
     private val _isPaused = MutableStateFlow(false)
     val isPaused: StateFlow<Boolean> = _isPaused.asStateFlow()
 
-    private val _selectedTopic = MutableStateFlow(if (startInUnifiedScroll) "#FYP" else "Trending")
+    private val _selectedTopic = MutableStateFlow("#FYP")
     val selectedTopic: StateFlow<String> = _selectedTopic.asStateFlow()
 
     private val _isSearchOpen = MutableStateFlow(false)
@@ -141,6 +140,8 @@ class ViewerViewModel(
     val streamingOkHttpClient = repository.streamingOkHttpClient
 
     private var insightJob: Job? = null
+    private var nextFeedCursor: String? = "1"
+    private var isLoadingMoreFeed = false
 
     init {
         if (!startInUnifiedScroll) {
@@ -206,12 +207,28 @@ class ViewerViewModel(
         _isSettingsOpen.value = false
     }
 
+    fun reloadUnifiedFeed() {
+        _isSettingsOpen.value = false
+        _isPaused.value = false
+        if (_viewerEngineMode.value == ViewerEngineMode.GUEST_SCROLL) {
+            _guestReloadToken.value += 1
+        } else {
+            loadFeed(forceRefresh = true)
+        }
+    }
+
     fun loadFeed(forceRefresh: Boolean = false) {
         viewModelScope.launch {
             _isPaused.value = false
             _feedState.value = FeedUiState.Loading("Memuat video...")
-            val res = repository.loadPublicFeed(forceRefresh)
-            applyFeedResult(res, autoFallbackToGuestOnFailure = true)
+            val res = withTimeoutOrNull(4_200L) {
+                repository.loadPublicFeed(forceRefresh)
+            }
+            if (res == null) {
+                activateSeamlessGuestFallback("Beralih cepat ke Mode Scroll Tanpa Login")
+            } else {
+                applyFeedResult(res, autoFallbackToGuestOnFailure = true)
+            }
         }
     }
 
@@ -238,6 +255,8 @@ class ViewerViewModel(
             is ProviderResult.Success -> {
                 _currentVideoIndex.value = 0
                 _isPaused.value = false
+                nextFeedCursor = res.data.nextCursor ?: "1"
+                isLoadingMoreFeed = false
                 _viewerEngineMode.value = ViewerEngineMode.NATIVE_STREAM
                 _feedState.value = FeedUiState.Ready(
                     videos = res.data.videos,
@@ -309,6 +328,42 @@ class ViewerViewModel(
             _currentVideoIndex.value = index
             _isPaused.value = false
             _aiInsightState.value = AiVideoInsightState.Idle
+
+            val ready = _feedState.value as? FeedUiState.Ready
+            if (_viewerEngineMode.value == ViewerEngineMode.NATIVE_STREAM &&
+                ready != null &&
+                index >= (ready.videos.size - 4).coerceAtLeast(1) &&
+                !isLoadingMoreFeed
+            ) {
+                loadMoreFeed()
+            }
+        }
+    }
+
+    private fun loadMoreFeed() {
+        val currentCursor = nextFeedCursor ?: "1"
+        isLoadingMoreFeed = true
+        viewModelScope.launch {
+            try {
+                when (val res = repository.loadMorePublicFeed(currentCursor)) {
+                    is ProviderResult.Success -> {
+                        val currentReady = _feedState.value as? FeedUiState.Ready ?: return@launch
+                        val existingIds = currentReady.videos.mapTo(HashSet()) { it.id }
+                        val fresh = res.data.videos.filter { it.id !in existingIds }
+                        nextFeedCursor = res.data.nextCursor ?: ((currentCursor.toIntOrNull() ?: 1) + 1).toString()
+                        if (fresh.isNotEmpty()) {
+                            _feedState.value = currentReady.copy(
+                                videos = currentReady.videos + fresh
+                            )
+                        }
+                    }
+                    else -> {
+                        nextFeedCursor = ((currentCursor.toIntOrNull() ?: 1) + 1).toString()
+                    }
+                }
+            } finally {
+                isLoadingMoreFeed = false
+            }
         }
     }
 

@@ -153,6 +153,14 @@ class HybridTikTokRepository(
         return result
     }
 
+    suspend fun loadMorePublicFeed(cursor: String): ProviderResult<FeedPage> {
+        val tikWm = tikWmProvider
+        if (tikWm != null) {
+            return tikWm.fetchTrendingFeed(cursor = cursor)
+        }
+        return loadPublicFeed(forceRefresh = true)
+    }
+
     suspend fun loadTopicFeed(topic: String): ProviderResult<FeedPage> {
         val clean = topic.trim()
         if (clean.equals("Trending", ignoreCase = true) || clean.isBlank()) {

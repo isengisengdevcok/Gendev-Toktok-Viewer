@@ -322,11 +322,11 @@ class GendevViewModelAndOEmbedTest {
 
         // Must never strand user on dead error screen when stream APIs fail
         assertEquals(ViewerEngineMode.GUEST_SCROLL, vm.viewerEngineMode.value)
-        assertEquals("https://www.tiktok.com/explore", vm.guestUrl.value)
+        assertEquals("https://www.tiktok.com/foryou", vm.guestUrl.value)
 
         // Switching topic in Guest Scroll mode updates URL cleanly
-        vm.selectTopic("#FYP")
-        assertEquals("https://www.tiktok.com/foryou", vm.guestUrl.value)
+        vm.selectTopic("Trending")
+        assertEquals("https://www.tiktok.com/explore", vm.guestUrl.value)
 
         // Gemini AI Vibe discovery populates Ready state and applies cleanly
         vm.askAiVibe("kucing santai")
@@ -338,9 +338,8 @@ class GendevViewModelAndOEmbedTest {
     }
 
     @Test
-    fun `default viewmodel starts instantly in unified foryou scroll mode and updates theme settings`() = runTest {
+    fun `default viewmodel falls back to foryou guest scroll when unavailable and updates theme settings`() = runTest {
         val client = PrivacyPolicyEnforcer.createPrivacyOkHttpClient()
-        val moshi = Moshi.Builder().addLast(KotlinJsonAdapterFactory()).build()
         val oEmbedService = object : TikTokOEmbedService {
             override suspend fun getOEmbed(videoUrl: String): retrofit2.Response<com.gendev.tiktokviewer.data.remote.dto.TikTokOEmbedDto> {
                 return retrofit2.Response.error(404, "Not found".toResponseBody("text/plain".toMediaType()))
@@ -363,6 +362,7 @@ class GendevViewModelAndOEmbedTest {
         )
 
         val vm = ViewerViewModel(repository)
+        advanceUntilIdle()
         assertEquals(ViewerEngineMode.GUEST_SCROLL, vm.viewerEngineMode.value)
         assertEquals("https://www.tiktok.com/foryou", vm.guestUrl.value)
 
@@ -370,5 +370,85 @@ class GendevViewModelAndOEmbedTest {
         assertEquals(com.gendev.tiktokviewer.ui.theme.GendevThemePreset.MIDNIGHT_BLUE, vm.themePreset.value)
         vm.setUltraCleanMode(true)
         assertTrue(vm.ultraCleanMode.value)
+    }
+
+    @Test
+    fun `native stream loads more videos automatically when scrolling near end`() = runTest {
+        val feedJson = """
+            {
+              "code": 0,
+              "msg": "success",
+              "data": [
+                {"video_id": "101", "title": "Clip 1", "play": "https://cdn.example/101.mp4", "author": {"unique_id": "a1"}},
+                {"video_id": "102", "title": "Clip 2", "play": "https://cdn.example/102.mp4", "author": {"unique_id": "a2"}},
+                {"video_id": "103", "title": "Clip 3", "play": "https://cdn.example/103.mp4", "author": {"unique_id": "a3"}},
+                {"video_id": "104", "title": "Clip 4", "play": "https://cdn.example/104.mp4", "author": {"unique_id": "a4"}},
+                {"video_id": "105", "title": "Clip 5", "play": "https://cdn.example/105.mp4", "author": {"unique_id": "a5"}}
+              ]
+            }
+        """.trimIndent()
+        val searchMoreJson = """
+            {
+              "code": 0,
+              "msg": "success",
+              "data": {
+                "videos": [
+                  {"video_id": "201", "title": "More 1", "play": "https://cdn.example/201.mp4", "author": {"unique_id": "b1"}},
+                  {"video_id": "202", "title": "More 2", "play": "https://cdn.example/202.mp4", "author": {"unique_id": "b2"}}
+                ]
+              }
+            }
+        """.trimIndent()
+
+        val client = PrivacyPolicyEnforcer.createPrivacyOkHttpClient()
+            .newBuilder()
+            .addInterceptor(Interceptor { chain ->
+                val url = chain.request().url.toString()
+                val body = if (url.contains("/api/feed/search")) searchMoreJson else feedJson
+                Response.Builder()
+                    .request(chain.request())
+                    .protocol(Protocol.HTTP_1_1)
+                    .code(200)
+                    .message("OK")
+                    .body(body.toResponseBody("application/json".toMediaType()))
+                    .build()
+            })
+            .build()
+
+        val moshi = Moshi.Builder().addLast(KotlinJsonAdapterFactory()).build()
+        val tikWmProvider = com.gendev.tiktokviewer.data.provider.TikWmPublicProvider(client, moshi, ioDispatcher = testDispatcher)
+        val oEmbedService = object : TikTokOEmbedService {
+            override suspend fun getOEmbed(videoUrl: String): retrofit2.Response<com.gendev.tiktokviewer.data.remote.dto.TikTokOEmbedDto> {
+                return retrofit2.Response.error(404, "unused".toResponseBody("text/plain".toMediaType()))
+            }
+        }
+        val oEmbedProvider = TikTokOEmbedVideoProvider(oEmbedService, client, testDispatcher)
+        val publicAdapter = TikTokPublicContentAdapter(oEmbedProvider, client, testDispatcher)
+        val fallbackManager = TikTokFallbackManagerImpl(client, RetryBackoffPolicy(maxAttempts = 1, delayFn = {}))
+        val repository = HybridTikTokRepository(
+            cache = EphemeralMetadataCache(),
+            okHttpClient = client,
+            fallbackManager = fallbackManager,
+            tikWmProvider = tikWmProvider,
+            proxiTokInstances = emptyList(),
+            oEmbedVideoProvider = oEmbedProvider,
+            publicContentAdapter = publicAdapter,
+            playbackProvider = TikTokPlaybackProviderImpl(),
+            selfHostedFactory = { url ->
+                ProxiTokProvider("self", url, "Self", VideoSourceKind.PROXITOK_SELF_HOSTED, client, testDispatcher)
+            }
+        )
+
+        val vm = ViewerViewModel(repository)
+        advanceUntilIdle()
+        val initial = vm.feedState.value as FeedUiState.Ready
+        assertEquals(5, initial.videos.size)
+
+        // Scrolling near end triggers infinite load-more seamlessly
+        vm.onPageSelected(3)
+        advanceUntilIdle()
+        val expanded = vm.feedState.value as FeedUiState.Ready
+        assertEquals(7, expanded.videos.size)
+        assertTrue(expanded.videos.any { it.id == "201" })
     }
 }

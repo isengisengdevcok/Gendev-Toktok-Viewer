@@ -51,7 +51,46 @@ class TikWmPublicProvider(
     private val requestMutex = Mutex()
     private var lastRequestAtMs: Long = 0L
 
+    private val infiniteFeedTopics = listOf(
+        "fyp",
+        "viral",
+        "trending",
+        "lucu",
+        "musik",
+        "alam",
+        "kuliner",
+        "olahraga"
+    )
+
     override suspend fun fetchTrendingFeed(cursor: String?): ProviderResult<FeedPage> = withContext(ioDispatcher) {
+        val pageNum = cursor?.toIntOrNull()?.coerceAtLeast(0) ?: 0
+        if (pageNum > 0) {
+            val topic = infiniteFeedTopics[(pageNum - 1) % infiniteFeedTopics.size]
+            val searchCursor = ((pageNum - 1) / infiniteFeedTopics.size) * 15
+            val pagedUrl = "$normalizedBase/api/feed/search?keywords=${encode(topic)}&count=15&cursor=$searchCursor&hd=1"
+            return@withContext when (val raw = executeJsonGet(pagedUrl)) {
+                is JsonFetchResult.Success -> {
+                    val parsed = runCatching { searchAdapter.fromJson(raw.body) }.getOrNull()
+                    val videos = parsed?.data?.videos.orEmpty().mapNotNull { it.toDomain() }
+                    if (videos.isNotEmpty()) {
+                        ProviderResult.Success(
+                            data = FeedPage(
+                                videos = videos,
+                                nextCursor = (pageNum + 1).toString(),
+                                sourceKind = sourceKind,
+                                sourceEndpoint = displayLabel
+                            ),
+                            sourceKind = sourceKind,
+                            endpoint = displayLabel
+                        )
+                    } else {
+                        ProviderResult.ContentUnavailable("No more videos for page $pageNum")
+                    }
+                }
+                is JsonFetchResult.Failure -> raw.result
+            }
+        }
+
         val region = "ID"
         val url = "$normalizedBase/api/feed/list?region=$region&count=15"
         when (val raw = executeJsonGet(url)) {
@@ -63,7 +102,7 @@ class TikWmPublicProvider(
                         return@withContext ProviderResult.Success(
                             data = FeedPage(
                                 videos = videos,
-                                nextCursor = null,
+                                nextCursor = "1",
                                 sourceKind = sourceKind,
                                 sourceEndpoint = displayLabel
                             ),
@@ -77,7 +116,7 @@ class TikWmPublicProvider(
                     is ProviderResult.Success -> ProviderResult.Success(
                         data = FeedPage(
                             videos = fypFallback.data,
-                            nextCursor = null,
+                            nextCursor = "1",
                             sourceKind = sourceKind,
                             sourceEndpoint = displayLabel
                         ),
