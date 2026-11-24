@@ -31,10 +31,22 @@ jobs:
             "$SDKMANAGER" "platform-tools" "platforms;android-36" "build-tools;36.0.0" || true
           fi
 
-      - name: Decode debug keystore
+      - name: Prepare Debug Keystore
         run: |
           if [ -f debug.keystore.base64 ]; then
-            base64 -d debug.keystore.base64 > debug.keystore
+            tr -d '\r\n ' < debug.keystore.base64 | base64 -d > debug.keystore || rm -f debug.keystore
+          fi
+          if [ ! -s debug.keystore ]; then
+            rm -f debug.keystore
+            keytool -genkeypair -v \
+              -keystore debug.keystore \
+              -alias androiddebugkey \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10000 \
+              -storepass android \
+              -keypass android \
+              -dname "CN=Android Debug,O=Android,C=US"
           fi
 
       - name: Prepare Release Keystore
@@ -43,8 +55,9 @@ jobs:
           STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
-          if [ -n "$KEYSTORE_BASE64" ]; then
-            echo "$KEYSTORE_BASE64" | base64 -d > my-upload-key.jks
+          rm -f my-upload-key.jks
+          if [ -n "$KEYSTORE_BASE64" ] && [ -n "$STORE_PASSWORD" ] && [ -n "$KEY_PASSWORD" ]; then
+            printf '%s' "$KEYSTORE_BASE64" | tr -d '\r\n ' | base64 -d > my-upload-key.jks
             echo "KEYSTORE_PATH=${{ github.workspace }}/my-upload-key.jks" >> $GITHUB_ENV
             echo "STORE_PASSWORD=$STORE_PASSWORD" >> $GITHUB_ENV
             echo "KEY_PASSWORD=$KEY_PASSWORD" >> $GITHUB_ENV
