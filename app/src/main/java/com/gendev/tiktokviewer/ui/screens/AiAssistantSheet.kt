@@ -281,37 +281,23 @@ fun AiAssistantSheet(
                                     style = MaterialTheme.typography.labelMedium,
                                     color = NeonViolet
                                 )
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                Button(
+                                    onClick = { onApplyVibeToGuestScroll(suggestion) },
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = MaterialTheme.colorScheme.primary,
+                                        contentColor = PureWhite
+                                    ),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .minimumInteractiveComponentSize()
                                 ) {
-                                    Button(
-                                        onClick = { onApplyVibeToGuestScroll(suggestion) },
-                                        colors = ButtonDefaults.buttonColors(
-                                            containerColor = ElectricPurple,
-                                            contentColor = PureWhite
-                                        ),
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .minimumInteractiveComponentSize()
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Rounded.PlayArrow,
-                                            contentDescription = null,
-                                            modifier = Modifier.size(18.dp)
-                                        )
-                                        Spacer(modifier = Modifier.width(4.dp))
-                                        Text("Scroll Langsung")
-                                    }
-                                    OutlinedButton(
-                                        onClick = { onApplyVibeToStream(suggestion) },
-                                        border = BorderStroke(1.dp, DarkGlassBorder),
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .minimumInteractiveComponentSize()
-                                    ) {
-                                        Text("Mode Stream", color = PureWhite)
-                                    }
+                                    Icon(
+                                        imageVector = Icons.Rounded.PlayArrow,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Buka & Scroll Feed")
                                 }
                             }
                         }

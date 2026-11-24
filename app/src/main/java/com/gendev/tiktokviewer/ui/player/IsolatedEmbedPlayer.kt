@@ -66,6 +66,7 @@ fun IsolatedEmbedPlayer(
     val webView = remember(embedUrl) {
         WebView(context).apply {
             setBackgroundColor(AndroidColor.BLACK)
+            setLayerType(android.view.View.LAYER_TYPE_HARDWARE, null)
             layoutParams = ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT
@@ -152,7 +153,7 @@ fun IsolatedEmbedPlayer(
             onLoadingChanged(true)
             webView.onResume()
             webView.loadUrl(effectiveUrl)
-            delay(5_500L)
+            delay(2_000L)
             onLoadingChanged(false)
         } else {
             webView.onPause()

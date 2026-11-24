@@ -15,9 +15,12 @@ import com.gendev.tiktokviewer.domain.model.PlaybackMode
 import com.gendev.tiktokviewer.domain.model.PublicVideo
 import com.gendev.tiktokviewer.domain.model.VideoSourceKind
 import com.gendev.tiktokviewer.ui.components.ResilientErrorCard
+import com.gendev.tiktokviewer.ui.screens.SimpleSettingsSheet
 import com.gendev.tiktokviewer.ui.screens.ViewerFeedScreen
 import com.gendev.tiktokviewer.ui.theme.GendevTheme
+import com.gendev.tiktokviewer.ui.theme.GendevThemePreset
 import com.gendev.tiktokviewer.ui.viewmodel.FeedUiState
+import com.gendev.tiktokviewer.ui.viewmodel.ViewerEngineMode
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -65,10 +68,10 @@ class GendevComposeUiTest {
     )
 
     @Test
-    fun `3_vertical_swipe_play_pause_and_zero_social_buttons`() {
+    fun `3_vertical_swipe_clean_ui_play_pause_and_zero_social_buttons`() {
         var lastPage = 0
         var pausedState by mutableStateOf(false)
-        var selectedTopic by mutableStateOf("Trending")
+        var settingsOpened = false
 
         composeTestRule.setContent {
             GendevTheme {
@@ -77,30 +80,32 @@ class GendevComposeUiTest {
                     currentIndex = 0,
                     isPaused = pausedState,
                     isMuted = false,
-                    selectedTopic = selectedTopic,
-                    endpointHealth = emptyList(),
+                    ultraCleanMode = false,
                     okHttpClient = PrivacyPolicyEnforcer.createPrivacyOkHttpClient(),
                     onPageChanged = { lastPage = it },
                     onTogglePlayPause = { pausedState = !pausedState },
                     onToggleMute = {},
-                    onSelectTopic = { selectedTopic = it },
-                    onOpenSearch = {},
-                    onOpenResilience = {},
-                    onHashtagClick = {},
+                    onOpenSettings = { settingsOpened = true },
+                    onReturnToUnifiedScroll = {},
                     onRetry = {},
                     onSwitchSource = {},
-                    onFallbackToEmbed = { _, _ -> }
+                    onFallbackToEmbed = { _, _ -> },
+                    viewerEngineMode = ViewerEngineMode.NATIVE_STREAM
                 )
             }
         }
 
         composeTestRule.waitForIdle()
-        composeTestRule.onNodeWithText("GENDEV").assertIsDisplayed()
+        // Top clutter, tabs, and Scroll/Stream switchers must not be displayed
+        composeTestRule.onNodeWithText("GENDEV").assertDoesNotExist()
+        composeTestRule.onNodeWithText("Scroll").assertDoesNotExist()
+        composeTestRule.onNodeWithText("Stream").assertDoesNotExist()
+        composeTestRule.onNodeWithTag("topic_pill_Trending").assertDoesNotExist()
+
         composeTestRule.onNodeWithText("@creator_one").assertIsDisplayed()
-        composeTestRule.onNodeWithTag("open_search_button").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("open_settings_button").assertIsDisplayed()
         composeTestRule.onNodeWithTag("play_pause_button").assertIsDisplayed()
         composeTestRule.onNodeWithTag("mute_toggle_button").assertIsDisplayed()
-        composeTestRule.onNodeWithTag("topic_pill_Trending").assertIsDisplayed()
 
         // Toggle Play/Pause button
         composeTestRule.onNodeWithTag("play_pause_button").performClick()
@@ -110,6 +115,11 @@ class GendevComposeUiTest {
         composeTestRule.onNodeWithTag("play_pause_button").performClick()
         composeTestRule.waitForIdle()
         assertEquals(false, pausedState)
+
+        // Open simple settings sheet
+        composeTestRule.onNodeWithTag("open_settings_button").performClick()
+        composeTestRule.waitForIdle()
+        assertTrue(settingsOpened)
 
         // Verify zero social buttons exist
         composeTestRule.onNodeWithText("Like").assertDoesNotExist()
@@ -121,6 +131,38 @@ class GendevComposeUiTest {
         composeTestRule.onNodeWithTag("vertical_video_pager").performTouchInput { swipeUp() }
         composeTestRule.waitForIdle()
         assertTrue(lastPage == 1)
+    }
+
+    @Test
+    fun `simple_settings_sheet_switches_theme_and_ultra_clean_mode`() {
+        var selectedTheme by mutableStateOf(GendevThemePreset.AMOLED_DARK)
+        var ultraClean by mutableStateOf(false)
+
+        composeTestRule.setContent {
+            GendevTheme(preset = selectedTheme) {
+                SimpleSettingsSheet(
+                    currentTheme = selectedTheme,
+                    ultraCleanMode = ultraClean,
+                    bannerMessage = null,
+                    onSelectTheme = { selectedTheme = it },
+                    onToggleUltraCleanMode = { ultraClean = it },
+                    onOpenSearch = {},
+                    onOpenAiAssistant = {},
+                    onReloadFeed = {},
+                    onWipeCache = {},
+                    onOpenAdvancedStatus = {},
+                    onClose = {}
+                )
+            }
+        }
+
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("theme_preset_emerald").performClick()
+        composeTestRule.onNodeWithTag("ultra_clean_switch").performClick()
+        composeTestRule.waitForIdle()
+
+        assertEquals(GendevThemePreset.EMERALD_DARK, selectedTheme)
+        assertTrue(ultraClean)
     }
 
     @Test

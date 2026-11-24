@@ -42,16 +42,30 @@ jobs:
           fi
           if [ ! -s debug.keystore ]; then
             rm -f debug.keystore
-            keytool -genkeypair -v \
+            keytool -genkeypair -noprompt \
               -keystore debug.keystore \
               -alias androiddebugkey \
               -keyalg RSA \
               -keysize 2048 \
+              -sigalg SHA256withRSA \
+              -startdate 2020/01/01 \
               -validity 10000 \
               -storepass android \
               -keypass android \
               -dname "CN=Android Debug,O=Android,C=US"
           fi
+          rm -f ci-debug.keystore
+          keytool -genkeypair -noprompt \
+            -keystore ci-debug.keystore \
+            -alias androiddebugkey \
+            -keyalg RSA \
+            -keysize 2048 \
+            -sigalg SHA256withRSA \
+            -startdate 2020/01/01 \
+            -validity 10000 \
+            -storepass android \
+            -keypass android \
+            -dname "CN=GENDEV Debug,O=GENDEV,C=US"
 
       - name: Prepare Release Keystore
         env:
@@ -66,15 +80,17 @@ jobs:
             echo "STORE_PASSWORD=$STORE_PASSWORD" >> $GITHUB_ENV
             echo "KEY_PASSWORD=$KEY_PASSWORD" >> $GITHUB_ENV
           else
-            keytool -genkeypair -v \
+            keytool -genkeypair -noprompt \
               -keystore my-upload-key.jks \
               -alias upload \
               -keyalg RSA \
               -keysize 2048 \
+              -sigalg SHA256withRSA \
+              -startdate 2020/01/01 \
               -validity 10000 \
               -storepass gendevci123 \
               -keypass gendevci123 \
-              -dname "CN=GENDEV CI, OU=Mobile, O=GENDEV, L=Local, ST=NA, C=US"
+              -dname "CN=GENDEV Release, OU=Mobile, O=GENDEV, L=Local, ST=NA, C=US"
             echo "KEYSTORE_PATH=${{ github.workspace }}/my-upload-key.jks" >> $GITHUB_ENV
             echo "STORE_PASSWORD=gendevci123" >> $GITHUB_ENV
             echo "KEY_PASSWORD=gendevci123" >> $GITHUB_ENV
@@ -94,18 +110,57 @@ jobs:
       - name: Build Release APK
         run: gradle :app:assembleRelease --no-daemon --no-configuration-cache
 
+      - name: Zipalign, Sign (v1+v2+v3) & Verify APKs
+        run: |
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          BUILD_TOOLS_DIR=$(ls -d "$SDK_ROOT"/build-tools/* | sort -V | tail -n 1)
+          ZIPALIGN="$BUILD_TOOLS_DIR/zipalign"
+          APKSIGNER="$BUILD_TOOLS_DIR/apksigner"
+
+          mkdir -p release-assets
+          RAW_DEBUG=$(find app/build/outputs/apk/debug -maxdepth 1 -name '*.apk' | head -n 1)
+          RAW_RELEASE=$(find app/build/outputs/apk/release -maxdepth 1 -name '*.apk' | head -n 1)
+
+          "$ZIPALIGN" -p -f 4 "$RAW_DEBUG" release-assets/gendev-tiktok-viewer-debug.apk
+          "$ZIPALIGN" -p -f 4 "$RAW_RELEASE" release-assets/gendev-tiktok-viewer-release.apk
+
+          "$APKSIGNER" sign \
+            --ks ci-debug.keystore \
+            --ks-key-alias androiddebugkey \
+            --ks-pass pass:android \
+            --key-pass pass:android \
+            --min-sdk-version 21 \
+            --v1-signing-enabled true \
+            --v2-signing-enabled true \
+            --v3-signing-enabled true \
+            release-assets/gendev-tiktok-viewer-debug.apk
+
+          "$APKSIGNER" sign \
+            --ks "$KEYSTORE_PATH" \
+            --ks-key-alias upload \
+            --ks-pass "pass:$STORE_PASSWORD" \
+            --key-pass "pass:$KEY_PASSWORD" \
+            --min-sdk-version 21 \
+            --v1-signing-enabled true \
+            --v2-signing-enabled true \
+            --v3-signing-enabled true \
+            release-assets/gendev-tiktok-viewer-release.apk
+
+          "$APKSIGNER" verify --verbose --print-certs release-assets/gendev-tiktok-viewer-debug.apk
+          "$APKSIGNER" verify --verbose --print-certs release-assets/gendev-tiktok-viewer-release.apk
+
       - name: Upload Debug APK
         uses: actions/upload-artifact@v4
         with:
           name: gendev-tiktok-viewer-debug-apk
-          path: app/build/outputs/apk/debug/*.apk
+          path: release-assets/gendev-tiktok-viewer-debug.apk
           if-no-files-found: error
 
       - name: Upload Release APK
         uses: actions/upload-artifact@v4
         with:
           name: gendev-tiktok-viewer-release-apk
-          path: app/build/outputs/apk/release/*.apk
+          path: release-assets/gendev-tiktok-viewer-release.apk
           if-no-files-found: error
 
       - name: Publish GitHub Release
@@ -113,12 +168,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          mkdir -p release-assets
-          DEBUG_APK=$(find app/build/outputs/apk/debug -maxdepth 1 -name '*.apk' | head -n 1)
-          RELEASE_APK=$(find app/build/outputs/apk/release -maxdepth 1 -name '*.apk' | head -n 1)
-          cp "$DEBUG_APK" release-assets/gendev-tiktok-viewer-debug.apk
-          cp "$RELEASE_APK" release-assets/gendev-tiktok-viewer-release.apk
-
           if [ "${{ github.ref_type }}" = "tag" ]; then
             TAG="${{ github.ref_name }}"
           else
@@ -131,6 +180,6 @@ jobs:
             gh release create "$TAG" release-assets/*.apk \
               --target "${{ github.sha }}" \
               --title "GENDEV TikTok Viewer ($TAG)" \
-              --notes "Automated Debug & Release APK build from commit ${{ github.sha }}." \
+              --notes "Signed & verified (v1+v2+v3) Debug and Release APKs ready to install." \
               --latest
           fi

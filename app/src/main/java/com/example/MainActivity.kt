@@ -15,6 +15,7 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -25,6 +26,7 @@ import com.gendev.tiktokviewer.data.repository.HybridTikTokRepository
 import com.gendev.tiktokviewer.ui.screens.AiAssistantSheet
 import com.gendev.tiktokviewer.ui.screens.PublicSearchSheet
 import com.gendev.tiktokviewer.ui.screens.ResilienceShieldSheet
+import com.gendev.tiktokviewer.ui.screens.SimpleSettingsSheet
 import com.gendev.tiktokviewer.ui.screens.ViewerFeedScreen
 import com.gendev.tiktokviewer.ui.theme.GendevTheme
 import com.gendev.tiktokviewer.ui.viewmodel.FeedUiState
@@ -43,7 +45,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // STEP 1: Configure Firebase App Check with launch intent before any UI or ViewModels.
+        // Configure Firebase App Check with launch intent before any UI or ViewModels.
         configureAppCheck(this, intent)
 
         enableEdgeToEdge(
@@ -54,7 +56,11 @@ class MainActivity : ComponentActivity() {
         handleIncomingDeepLink(intent)
 
         setContent {
-            GendevTheme {
+            val themePreset by viewModel.themePreset.collectAsStateWithLifecycle()
+            LaunchedEffect(Unit) {
+                viewModel.loadUiPreferences(this@MainActivity)
+            }
+            GendevTheme(preset = themePreset) {
                 GendevViewerApp(viewModel = viewModel)
             }
         }
@@ -84,8 +90,10 @@ fun GendevViewerApp(viewModel: ViewerViewModel) {
     val currentIndex by viewModel.currentVideoIndex.collectAsStateWithLifecycle()
     val isPaused by viewModel.isPaused.collectAsStateWithLifecycle()
     val isMuted by viewModel.isMuted.collectAsStateWithLifecycle()
-    val selectedTopic by viewModel.selectedTopic.collectAsStateWithLifecycle()
+    val themePreset by viewModel.themePreset.collectAsStateWithLifecycle()
+    val ultraCleanMode by viewModel.ultraCleanMode.collectAsStateWithLifecycle()
     val isSearchOpen by viewModel.isSearchOpen.collectAsStateWithLifecycle()
+    val isSettingsOpen by viewModel.isSettingsOpen.collectAsStateWithLifecycle()
     val isResilienceOpen by viewModel.isResilienceOpen.collectAsStateWithLifecycle()
     val isAiSheetOpen by viewModel.isAiSheetOpen.collectAsStateWithLifecycle()
     val aiVibeState by viewModel.aiVibeState.collectAsStateWithLifecycle()
@@ -107,26 +115,43 @@ fun GendevViewerApp(viewModel: ViewerViewModel) {
             currentIndex = currentIndex,
             isPaused = isPaused,
             isMuted = isMuted,
-            selectedTopic = selectedTopic,
-            endpointHealth = endpointHealth,
+            ultraCleanMode = ultraCleanMode,
             okHttpClient = viewModel.streamingOkHttpClient,
             onPageChanged = viewModel::onPageSelected,
             onTogglePlayPause = viewModel::togglePlayPause,
             onToggleMute = viewModel::toggleMute,
-            onSelectTopic = viewModel::selectTopic,
-            onOpenSearch = viewModel::openSearch,
-            onOpenResilience = viewModel::openResilienceSheet,
-            onHashtagClick = viewModel::openHashtagFromFeed,
+            onOpenSettings = viewModel::openSettings,
+            onReturnToUnifiedScroll = { viewModel.openGuestScroll("#FYP") },
             onRetry = { viewModel.loadFeed(forceRefresh = true) },
             onSwitchSource = viewModel::switchSourceAndRetry,
             onFallbackToEmbed = viewModel::fallbackVideoToEmbed,
             viewerEngineMode = viewerEngineMode,
             guestUrl = guestUrl,
-            guestReloadToken = guestReloadToken,
-            onSelectEngineMode = viewModel::switchEngineMode,
-            onReloadGuestScroll = viewModel::reloadGuestScroll,
-            onOpenAiAssistant = viewModel::openAiSheet
+            guestReloadToken = guestReloadToken
         )
+
+        AnimatedVisibility(
+            visible = isSettingsOpen,
+            enter = fadeIn() + slideInVertically { it / 10 },
+            exit = fadeOut() + slideOutVertically { it / 10 }
+        ) {
+            SimpleSettingsSheet(
+                currentTheme = themePreset,
+                ultraCleanMode = ultraCleanMode,
+                bannerMessage = bannerMessage,
+                onSelectTheme = { preset -> viewModel.selectThemePreset(preset, context) },
+                onToggleUltraCleanMode = { enabled -> viewModel.setUltraCleanMode(enabled, context) },
+                onOpenSearch = viewModel::openSearch,
+                onOpenAiAssistant = viewModel::openAiSheet,
+                onReloadFeed = { viewModel.openGuestScroll("#FYP") },
+                onWipeCache = { viewModel.wipeEphemeralCache(context) },
+                onOpenAdvancedStatus = viewModel::openResilienceSheet,
+                onClose = {
+                    viewModel.clearBanner()
+                    viewModel.closeSettings()
+                }
+            )
+        }
 
         AnimatedVisibility(
             visible = isSearchOpen,

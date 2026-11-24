@@ -181,7 +181,7 @@ class GendevViewModelAndOEmbedTest {
             }
         )
 
-        val vm = ViewerViewModel(repository)
+        val vm = ViewerViewModel(repository, startInUnifiedScroll = false)
         advanceUntilIdle()
 
         val state = vm.feedState.value
@@ -317,7 +317,7 @@ class GendevViewModelAndOEmbedTest {
             }
         }
 
-        val vm = ViewerViewModel(repository, fakeAi)
+        val vm = ViewerViewModel(repository, fakeAi, startInUnifiedScroll = false)
         advanceUntilIdle()
 
         // Must never strand user on dead error screen when stream APIs fail
@@ -335,5 +335,40 @@ class GendevViewModelAndOEmbedTest {
         assertTrue(aiState is AiVibeState.Ready)
         vm.applyAiVibeToGuestScroll((aiState as AiVibeState.Ready).suggestion)
         assertEquals("https://www.tiktok.com/tag/kucinglucu", vm.guestUrl.value)
+    }
+
+    @Test
+    fun `default viewmodel starts instantly in unified foryou scroll mode and updates theme settings`() = runTest {
+        val client = PrivacyPolicyEnforcer.createPrivacyOkHttpClient()
+        val moshi = Moshi.Builder().addLast(KotlinJsonAdapterFactory()).build()
+        val oEmbedService = object : TikTokOEmbedService {
+            override suspend fun getOEmbed(videoUrl: String): retrofit2.Response<com.gendev.tiktokviewer.data.remote.dto.TikTokOEmbedDto> {
+                return retrofit2.Response.error(404, "Not found".toResponseBody("text/plain".toMediaType()))
+            }
+        }
+        val oEmbedProvider = TikTokOEmbedVideoProvider(oEmbedService, client, testDispatcher)
+        val publicAdapter = TikTokPublicContentAdapter(oEmbedProvider, client, testDispatcher)
+        val fallbackManager = TikTokFallbackManagerImpl(client, RetryBackoffPolicy(maxAttempts = 1, delayFn = {}))
+        val repository = HybridTikTokRepository(
+            cache = EphemeralMetadataCache(),
+            okHttpClient = client,
+            fallbackManager = fallbackManager,
+            proxiTokInstances = emptyList(),
+            oEmbedVideoProvider = oEmbedProvider,
+            publicContentAdapter = publicAdapter,
+            playbackProvider = TikTokPlaybackProviderImpl(),
+            selfHostedFactory = { url ->
+                ProxiTokProvider("self", url, "Self", VideoSourceKind.PROXITOK_SELF_HOSTED, client, testDispatcher)
+            }
+        )
+
+        val vm = ViewerViewModel(repository)
+        assertEquals(ViewerEngineMode.GUEST_SCROLL, vm.viewerEngineMode.value)
+        assertEquals("https://www.tiktok.com/foryou", vm.guestUrl.value)
+
+        vm.selectThemePreset(com.gendev.tiktokviewer.ui.theme.GendevThemePreset.MIDNIGHT_BLUE)
+        assertEquals(com.gendev.tiktokviewer.ui.theme.GendevThemePreset.MIDNIGHT_BLUE, vm.themePreset.value)
+        vm.setUltraCleanMode(true)
+        assertTrue(vm.ultraCleanMode.value)
     }
 }

@@ -16,6 +16,7 @@ import com.gendev.tiktokviewer.domain.model.PrivacyConfig
 import com.gendev.tiktokviewer.domain.model.ProviderResult
 import com.gendev.tiktokviewer.domain.model.PublicVideo
 import com.gendev.tiktokviewer.domain.model.SearchMode
+import com.gendev.tiktokviewer.ui.theme.GendevThemePreset
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -63,21 +64,30 @@ sealed interface SearchUiState {
     ) : SearchUiState
 }
 
+private const val UI_PREFS_NAME = "gendev_ui_prefs"
+private const val PREF_THEME_ID = "theme_preset_id"
+private const val PREF_ULTRA_CLEAN = "ultra_clean_mode"
+
 class ViewerViewModel(
     private val repository: HybridTikTokRepository,
-    private val aiAssistant: GeminiScrollAssistant? = null
+    private val aiAssistant: GeminiScrollAssistant? = null,
+    private val startInUnifiedScroll: Boolean = true
 ) : ViewModel() {
 
-    private val _viewerEngineMode = MutableStateFlow(ViewerEngineMode.NATIVE_STREAM)
+    private val _viewerEngineMode = MutableStateFlow(
+        if (startInUnifiedScroll) ViewerEngineMode.GUEST_SCROLL else ViewerEngineMode.NATIVE_STREAM
+    )
     val viewerEngineMode: StateFlow<ViewerEngineMode> = _viewerEngineMode.asStateFlow()
 
-    private val _guestUrl = MutableStateFlow("https://www.tiktok.com/explore")
+    private val _guestUrl = MutableStateFlow(
+        if (startInUnifiedScroll) "https://www.tiktok.com/foryou" else "https://www.tiktok.com/explore"
+    )
     val guestUrl: StateFlow<String> = _guestUrl.asStateFlow()
 
     private val _guestReloadToken = MutableStateFlow(0)
     val guestReloadToken: StateFlow<Int> = _guestReloadToken.asStateFlow()
 
-    private val _feedState = MutableStateFlow<FeedUiState>(FeedUiState.Loading("Menghubungkan ke stream publik..."))
+    private val _feedState = MutableStateFlow<FeedUiState>(FeedUiState.Loading("Memuat video..."))
     val feedState: StateFlow<FeedUiState> = _feedState.asStateFlow()
 
     private val _searchState = MutableStateFlow<SearchUiState>(SearchUiState.Idle)
@@ -92,7 +102,7 @@ class ViewerViewModel(
     private val _isPaused = MutableStateFlow(false)
     val isPaused: StateFlow<Boolean> = _isPaused.asStateFlow()
 
-    private val _selectedTopic = MutableStateFlow("Trending")
+    private val _selectedTopic = MutableStateFlow(if (startInUnifiedScroll) "#FYP" else "Trending")
     val selectedTopic: StateFlow<String> = _selectedTopic.asStateFlow()
 
     private val _isSearchOpen = MutableStateFlow(false)
@@ -101,8 +111,17 @@ class ViewerViewModel(
     private val _isResilienceOpen = MutableStateFlow(false)
     val isResilienceOpen: StateFlow<Boolean> = _isResilienceOpen.asStateFlow()
 
+    private val _isSettingsOpen = MutableStateFlow(false)
+    val isSettingsOpen: StateFlow<Boolean> = _isSettingsOpen.asStateFlow()
+
     private val _isAiSheetOpen = MutableStateFlow(false)
     val isAiSheetOpen: StateFlow<Boolean> = _isAiSheetOpen.asStateFlow()
+
+    private val _themePreset = MutableStateFlow(GendevThemePreset.AMOLED_DARK)
+    val themePreset: StateFlow<GendevThemePreset> = _themePreset.asStateFlow()
+
+    private val _ultraCleanMode = MutableStateFlow(false)
+    val ultraCleanMode: StateFlow<Boolean> = _ultraCleanMode.asStateFlow()
 
     private val _aiVibeState = MutableStateFlow<AiVibeState>(AiVibeState.Idle)
     val aiVibeState: StateFlow<AiVibeState> = _aiVibeState.asStateFlow()
@@ -124,7 +143,41 @@ class ViewerViewModel(
     private var insightJob: Job? = null
 
     init {
-        loadFeed(forceRefresh = false)
+        if (!startInUnifiedScroll) {
+            loadFeed(forceRefresh = false)
+        }
+    }
+
+    fun loadUiPreferences(context: Context) {
+        val prefs = context.getSharedPreferences(UI_PREFS_NAME, Context.MODE_PRIVATE)
+        _themePreset.value = GendevThemePreset.fromId(prefs.getString(PREF_THEME_ID, null))
+        _ultraCleanMode.value = prefs.getBoolean(PREF_ULTRA_CLEAN, false)
+    }
+
+    fun selectThemePreset(preset: GendevThemePreset, context: Context? = null) {
+        _themePreset.value = preset
+        context?.getSharedPreferences(UI_PREFS_NAME, Context.MODE_PRIVATE)
+            ?.edit()
+            ?.putString(PREF_THEME_ID, preset.id)
+            ?.apply()
+    }
+
+    fun setUltraCleanMode(enabled: Boolean, context: Context? = null) {
+        _ultraCleanMode.value = enabled
+        context?.getSharedPreferences(UI_PREFS_NAME, Context.MODE_PRIVATE)
+            ?.edit()
+            ?.putBoolean(PREF_ULTRA_CLEAN, enabled)
+            ?.apply()
+    }
+
+    fun openSettings() {
+        _isPaused.value = true
+        _isSettingsOpen.value = true
+    }
+
+    fun closeSettings() {
+        _isSettingsOpen.value = false
+        _isPaused.value = false
     }
 
     fun switchEngineMode(mode: ViewerEngineMode) {
@@ -144,16 +197,19 @@ class ViewerViewModel(
         _isPaused.value = false
         _isSearchOpen.value = false
         _isAiSheetOpen.value = false
+        _isSettingsOpen.value = false
     }
 
     fun reloadGuestScroll() {
+        _isPaused.value = false
         _guestReloadToken.value += 1
+        _isSettingsOpen.value = false
     }
 
     fun loadFeed(forceRefresh: Boolean = false) {
         viewModelScope.launch {
             _isPaused.value = false
-            _feedState.value = FeedUiState.Loading("Menghubungkan stream publik...")
+            _feedState.value = FeedUiState.Loading("Memuat video...")
             val res = repository.loadPublicFeed(forceRefresh)
             applyFeedResult(res, autoFallbackToGuestOnFailure = true)
         }
@@ -265,6 +321,7 @@ class ViewerViewModel(
     }
 
     fun openSearch() {
+        _isSettingsOpen.value = false
         _isPaused.value = true
         _isSearchOpen.value = true
     }
@@ -275,6 +332,7 @@ class ViewerViewModel(
     }
 
     fun openResilienceSheet() {
+        _isSettingsOpen.value = false
         _isPaused.value = true
         _isResilienceOpen.value = true
     }
@@ -285,6 +343,7 @@ class ViewerViewModel(
     }
 
     fun openAiSheet() {
+        _isSettingsOpen.value = false
         _isPaused.value = true
         _isAiSheetOpen.value = true
     }

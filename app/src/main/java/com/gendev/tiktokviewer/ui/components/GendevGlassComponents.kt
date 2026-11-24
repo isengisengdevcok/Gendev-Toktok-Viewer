@@ -71,11 +71,15 @@ import com.gendev.tiktokviewer.ui.theme.PureWhite
 import com.gendev.tiktokviewer.ui.theme.RoseRestricted
 import com.gendev.tiktokviewer.ui.theme.UltravioletGlow
 
-fun Modifier.ambientObsidianAura(): Modifier = this.drawBehind {
-    drawRect(AmoledBlack)
+fun Modifier.ambientObsidianAura(
+    backgroundColor: Color = AmoledBlack,
+    primaryGlow: Color = ElectricPurple,
+    secondaryGlow: Color = UltravioletGlow
+): Modifier = this.drawBehind {
+    drawRect(backgroundColor)
     drawCircle(
         brush = Brush.radialGradient(
-            colors = listOf(ElectricPurple.copy(alpha = 0.22f), Color.Transparent),
+            colors = listOf(primaryGlow.copy(alpha = 0.20f), Color.Transparent),
             center = Offset(size.width * 0.2f, size.height * 0.18f),
             radius = size.maxDimension * 0.55f
         ),
@@ -84,7 +88,7 @@ fun Modifier.ambientObsidianAura(): Modifier = this.drawBehind {
     )
     drawCircle(
         brush = Brush.radialGradient(
-            colors = listOf(UltravioletGlow.copy(alpha = 0.18f), Color.Transparent),
+            colors = listOf(secondaryGlow.copy(alpha = 0.16f), Color.Transparent),
             center = Offset(size.width * 0.85f, size.height * 0.78f),
             radius = size.maxDimension * 0.5f
         ),
@@ -224,15 +228,26 @@ fun GlassIconButton(
     testTagName: String,
     isHighlighted: Boolean = false,
     sizeDp: Int = 48,
+    alpha: Float = 0.58f,
     modifier: Modifier = Modifier
 ) {
+    val containerColor = if (isHighlighted) {
+        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.85f)
+    } else {
+        Color.Black.copy(alpha = alpha)
+    }
+    val borderColor = if (isHighlighted) {
+        MaterialTheme.colorScheme.secondary.copy(alpha = 0.75f)
+    } else {
+        Color.White.copy(alpha = 0.16f)
+    }
     Surface(
         onClick = onClick,
         shape = CircleShape,
-        color = if (isHighlighted) DeepPlum.copy(alpha = 0.90f) else DarkGlassBg,
+        color = containerColor,
         border = BorderStroke(
             width = 1.dp,
-            color = if (isHighlighted) NeonViolet else DarkGlassSubtleBorder
+            color = borderColor
         ),
         modifier = modifier
             .size(sizeDp.dp)
@@ -243,7 +258,7 @@ fun GlassIconButton(
             Icon(
                 imageVector = icon,
                 contentDescription = contentDescription,
-                tint = if (isHighlighted) NeonViolet else PureWhite,
+                tint = if (isHighlighted) MaterialTheme.colorScheme.secondary else PureWhite,
                 modifier = Modifier.size((sizeDp * 0.45f).dp)
             )
         }

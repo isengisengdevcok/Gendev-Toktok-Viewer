@@ -71,15 +71,15 @@ fun ExoVideoPlayer(
     var lifecycleResumed by remember { mutableStateOf(true) }
 
     val exoPlayer = remember(streamUrl) {
-        // RAM-optimized buffer configuration tailored for 2GB RAM Android devices
+        // Low-latency RAM-optimized buffer configuration for fast video start & minimal buffering
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(
-                2_500, // minBufferMs
-                8_000, // maxBufferMs
-                800,   // bufferForPlaybackMs
-                1_500  // bufferForPlaybackAfterRebufferMs
+                1_500, // minBufferMs
+                6_000, // maxBufferMs
+                400,   // bufferForPlaybackMs (fast instant start)
+                900    // bufferForPlaybackAfterRebufferMs
             )
-            .setTargetBufferBytes(8 * 1024 * 1024)
+            .setTargetBufferBytes(6 * 1024 * 1024)
             .setPrioritizeTimeOverSizeThresholds(true)
             .build()
 

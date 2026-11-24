@@ -3,17 +3,10 @@ package com.gendev.tiktokviewer.ui.screens
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -21,29 +14,21 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.pager.VerticalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.VolumeOff
 import androidx.compose.material.icons.automirrored.rounded.VolumeUp
-import androidx.compose.material.icons.rounded.AutoAwesome
-import androidx.compose.material.icons.rounded.KeyboardArrowUp
+import androidx.compose.material.icons.rounded.DynamicFeed
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
-import androidx.compose.material.icons.rounded.Refresh
-import androidx.compose.material.icons.rounded.Search
-import androidx.compose.material.icons.rounded.Shield
-import androidx.compose.material.icons.rounded.SwapHoriz
-import androidx.compose.material3.Icon
+import androidx.compose.material.icons.rounded.Tune
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -64,34 +49,20 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.R
-import com.gendev.tiktokviewer.domain.model.EndpointHealth
 import com.gendev.tiktokviewer.domain.model.PlaybackMode
 import com.gendev.tiktokviewer.domain.model.PublicVideo
-import com.gendev.tiktokviewer.ui.components.EngineModeSwitcher
-import com.gendev.tiktokviewer.ui.components.GendevInitialHeroLoader
-import com.gendev.tiktokviewer.ui.components.GendevLogoBadge
-import com.gendev.tiktokviewer.ui.components.GendevPulseLoader
 import com.gendev.tiktokviewer.ui.components.GlassIconButton
 import com.gendev.tiktokviewer.ui.components.ResilientErrorCard
 import com.gendev.tiktokviewer.ui.components.ambientObsidianAura
 import com.gendev.tiktokviewer.ui.player.ExoVideoPlayer
 import com.gendev.tiktokviewer.ui.player.IsolatedEmbedPlayer
 import com.gendev.tiktokviewer.ui.player.TikTokGuestScrollPlayer
-import com.gendev.tiktokviewer.ui.theme.AmoledBlack
-import com.gendev.tiktokviewer.ui.theme.DarkGlassBg
-import com.gendev.tiktokviewer.ui.theme.DarkGlassBorder
 import com.gendev.tiktokviewer.ui.theme.DarkGlassSubtleBorder
-import com.gendev.tiktokviewer.ui.theme.DeepPlum
-import com.gendev.tiktokviewer.ui.theme.ElectricPurple
-import com.gendev.tiktokviewer.ui.theme.MutedLavender
-import com.gendev.tiktokviewer.ui.theme.NeonViolet
 import com.gendev.tiktokviewer.ui.theme.PureWhite
 import com.gendev.tiktokviewer.ui.viewmodel.FeedUiState
 import com.gendev.tiktokviewer.ui.viewmodel.ViewerEngineMode
 import kotlinx.coroutines.flow.distinctUntilChanged
 import okhttp3.OkHttpClient
-
-private val quickFeedTopics = listOf("Trending", "#FYP", "#Tech", "#Gaming", "#Music", "#Comedy", "#Nature")
 
 @Composable
 fun ViewerFeedScreen(
@@ -99,38 +70,39 @@ fun ViewerFeedScreen(
     currentIndex: Int,
     isPaused: Boolean,
     isMuted: Boolean,
-    selectedTopic: String,
-    endpointHealth: List<EndpointHealth>,
+    ultraCleanMode: Boolean,
     okHttpClient: OkHttpClient,
     onPageChanged: (Int) -> Unit,
     onTogglePlayPause: () -> Unit,
     onToggleMute: () -> Unit,
-    onSelectTopic: (String) -> Unit,
-    onOpenSearch: () -> Unit,
-    onOpenResilience: () -> Unit,
-    onHashtagClick: (String) -> Unit,
+    onOpenSettings: () -> Unit,
+    onReturnToUnifiedScroll: () -> Unit,
     onRetry: () -> Unit,
     onSwitchSource: () -> Unit,
     onFallbackToEmbed: (videoId: String, reason: String) -> Unit,
-    viewerEngineMode: ViewerEngineMode = ViewerEngineMode.NATIVE_STREAM,
-    guestUrl: String = "https://www.tiktok.com/explore",
+    viewerEngineMode: ViewerEngineMode = ViewerEngineMode.GUEST_SCROLL,
+    guestUrl: String = "https://www.tiktok.com/foryou",
     guestReloadToken: Int = 0,
-    onSelectEngineMode: (ViewerEngineMode) -> Unit = {},
-    onReloadGuestScroll: () -> Unit = {},
-    onOpenAiAssistant: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
+    val bg = MaterialTheme.colorScheme.background
+    val primary = MaterialTheme.colorScheme.primary
+
     Scaffold(
         modifier = modifier
             .fillMaxSize()
-            .background(AmoledBlack),
-        containerColor = AmoledBlack,
+            .background(bg),
+        containerColor = bg,
         contentWindowInsets = WindowInsets(0, 0, 0, 0)
     ) { _ ->
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .ambientObsidianAura()
+                .ambientObsidianAura(
+                    backgroundColor = bg,
+                    primaryGlow = primary,
+                    secondaryGlow = MaterialTheme.colorScheme.secondary
+                )
         ) {
             if (viewerEngineMode == ViewerEngineMode.GUEST_SCROLL) {
                 TikTokGuestScrollPlayer(
@@ -141,57 +113,36 @@ fun ViewerFeedScreen(
                     modifier = Modifier.fillMaxSize()
                 )
 
-                // Minimalist floating playback dock on Guest Scroll mode
-                Column(
+                MinimalCornerControls(
+                    ultraCleanMode = ultraCleanMode,
+                    isPaused = isPaused,
+                    isMuted = isMuted,
+                    showBackToFeed = false,
+                    onTogglePlayPause = onTogglePlayPause,
+                    onToggleMute = onToggleMute,
+                    onBackToFeed = onReturnToUnifiedScroll,
+                    onOpenSettings = onOpenSettings,
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
                         .navigationBarsPadding()
-                        .padding(end = 16.dp, bottom = 24.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    GlassIconButton(
-                        icon = Icons.Rounded.AutoAwesome,
-                        contentDescription = stringResource(R.string.ai_cd),
-                        onClick = onOpenAiAssistant,
-                        isHighlighted = true,
-                        sizeDp = 50,
-                        testTagName = "guest_ai_button"
-                    )
-                    GlassIconButton(
-                        icon = if (isPaused) Icons.Rounded.PlayArrow else Icons.Rounded.Pause,
-                        contentDescription = if (isPaused) "Play video" else "Pause video",
-                        onClick = onTogglePlayPause,
-                        isHighlighted = isPaused,
-                        sizeDp = 50,
-                        testTagName = "play_pause_button"
-                    )
-                    GlassIconButton(
-                        icon = if (isMuted) Icons.AutoMirrored.Rounded.VolumeOff else Icons.AutoMirrored.Rounded.VolumeUp,
-                        contentDescription = stringResource(R.string.mute_cd),
-                        onClick = onToggleMute,
-                        isHighlighted = isMuted,
-                        sizeDp = 48,
-                        testTagName = "mute_toggle_button"
-                    )
-                    GlassIconButton(
-                        icon = Icons.Rounded.Refresh,
-                        contentDescription = "Muat ulang scroll",
-                        onClick = onReloadGuestScroll,
-                        sizeDp = 48,
-                        testTagName = "reload_guest_scroll_button"
-                    )
-                }
+                        .padding(end = 14.dp, bottom = 18.dp)
+                )
             } else {
                 when (feedState) {
                     is FeedUiState.Loading -> {
-                        GendevInitialHeroLoader(
-                            sourceHint = feedState.sourceHint,
-                            onOpenSearch = onOpenSearch,
+                        Box(
                             modifier = Modifier
-                                .align(Alignment.Center)
-                                .testTag("feed_loading_indicator")
-                        )
+                                .fillMaxSize()
+                                .testTag("feed_loading_indicator"),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            CircularProgressIndicator(
+                                color = MaterialTheme.colorScheme.secondary,
+                                trackColor = Color.White.copy(alpha = 0.12f),
+                                strokeWidth = 2.5.dp,
+                                modifier = Modifier.size(36.dp)
+                            )
+                        }
                     }
 
                     is FeedUiState.Error -> {
@@ -203,24 +154,16 @@ fun ViewerFeedScreen(
                             isForbidden = feedState.isForbidden,
                             onRetry = onRetry,
                             onSwitchSource = onSwitchSource,
-                            onOpenGuestScroll = { onSelectEngineMode(ViewerEngineMode.GUEST_SCROLL) },
+                            onOpenGuestScroll = onReturnToUnifiedScroll,
                             modifier = Modifier.align(Alignment.Center)
                         )
                     }
 
                     is FeedUiState.Ready -> {
                         if (feedState.videos.isEmpty()) {
-                            ResilientErrorCard(
-                                title = "No Public Videos",
-                                message = "The selected public source returned zero videos.",
-                                isCaptcha = false,
-                                isRateLimited = false,
-                                isForbidden = false,
-                                onRetry = onRetry,
-                                onSwitchSource = onSwitchSource,
-                                onOpenGuestScroll = { onSelectEngineMode(ViewerEngineMode.GUEST_SCROLL) },
-                                modifier = Modifier.align(Alignment.Center)
-                            )
+                            LaunchedEffect(Unit) {
+                                onReturnToUnifiedScroll()
+                            }
                         } else {
                             val pagerState = rememberPagerState(
                                 initialPage = currentIndex.coerceIn(0, feedState.videos.lastIndex),
@@ -249,127 +192,107 @@ fun ViewerFeedScreen(
                             ) { pageIndex ->
                                 val video = feedState.videos[pageIndex]
                                 val isActive = pageIndex == pagerState.currentPage
-                                VideoFeedPage(
+                                CleanStreamVideoPage(
                                     video = video,
                                     isActivePage = isActive,
                                     isPaused = isPaused,
                                     isMuted = isMuted,
-                                    isFirstPage = pageIndex == 0 && feedState.videos.size > 1,
+                                    ultraCleanMode = ultraCleanMode,
                                     okHttpClient = okHttpClient,
                                     onTogglePlayPause = onTogglePlayPause,
-                                    onToggleMute = onToggleMute,
-                                    onSwitchSource = onSwitchSource,
-                                    onOpenAiAssistant = onOpenAiAssistant,
-                                    onHashtagClick = onHashtagClick,
                                     onFallbackToEmbed = onFallbackToEmbed
                                 )
                             }
                         }
                     }
                 }
-            }
 
-            // Minimalist Floating Top Header + Mode Switch + Quick Topic Pills
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .align(Alignment.TopCenter)
-                    .background(
-                        Brush.verticalGradient(
-                            colors = listOf(Color.Black.copy(alpha = 0.80f), Color.Transparent)
-                        )
-                    )
-                    .statusBarsPadding()
-                    .padding(top = 10.dp, bottom = 10.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                Row(
+                MinimalCornerControls(
+                    ultraCleanMode = ultraCleanMode,
+                    isPaused = isPaused,
+                    isMuted = isMuted,
+                    showBackToFeed = true,
+                    onTogglePlayPause = onTogglePlayPause,
+                    onToggleMute = onToggleMute,
+                    onBackToFeed = onReturnToUnifiedScroll,
+                    onOpenSettings = onOpenSettings,
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 14.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    GendevLogoBadge()
-
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        EngineModeSwitcher(
-                            isGuestScroll = viewerEngineMode == ViewerEngineMode.GUEST_SCROLL,
-                            onSelectGuestScroll = { onSelectEngineMode(ViewerEngineMode.GUEST_SCROLL) },
-                            onSelectNativeStream = { onSelectEngineMode(ViewerEngineMode.NATIVE_STREAM) }
-                        )
-                        GlassIconButton(
-                            icon = Icons.Rounded.AutoAwesome,
-                            contentDescription = stringResource(R.string.ai_cd),
-                            onClick = onOpenAiAssistant,
-                            sizeDp = 48,
-                            testTagName = "open_ai_button"
-                        )
-                        GlassIconButton(
-                            icon = Icons.Rounded.Search,
-                            contentDescription = stringResource(R.string.search_cd),
-                            onClick = onOpenSearch,
-                            sizeDp = 48,
-                            testTagName = "open_search_button"
-                        )
-                        GlassIconButton(
-                            icon = Icons.Rounded.Shield,
-                            contentDescription = stringResource(R.string.resilience_cd),
-                            onClick = onOpenResilience,
-                            sizeDp = 48,
-                            testTagName = "open_resilience_button"
-                        )
-                    }
-                }
-
-                LazyRow(
-                    contentPadding = PaddingValues(horizontal = 16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    items(quickFeedTopics) { topic ->
-                        val isSelected = selectedTopic.equals(topic, ignoreCase = true)
-                        Surface(
-                            onClick = { onSelectTopic(topic) },
-                            shape = RoundedCornerShape(50),
-                            color = if (isSelected) DeepPlum.copy(alpha = 0.92f) else DarkGlassBg,
-                            border = BorderStroke(
-                                width = 1.dp,
-                                color = if (isSelected) ElectricPurple else DarkGlassSubtleBorder
-                            ),
-                            modifier = Modifier.testTag("topic_pill_$topic")
-                        ) {
-                            Text(
-                                text = topic,
-                                style = MaterialTheme.typography.labelMedium,
-                                color = if (isSelected) NeonViolet else PureWhite.copy(alpha = 0.85f),
-                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp)
-                            )
-                        }
-                    }
-                }
+                        .align(Alignment.BottomEnd)
+                        .navigationBarsPadding()
+                        .padding(end = 14.dp, bottom = 18.dp)
+                )
             }
         }
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun VideoFeedPage(
+private fun MinimalCornerControls(
+    ultraCleanMode: Boolean,
+    isPaused: Boolean,
+    isMuted: Boolean,
+    showBackToFeed: Boolean,
+    onTogglePlayPause: () -> Unit,
+    onToggleMute: () -> Unit,
+    onBackToFeed: () -> Unit,
+    onOpenSettings: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier,
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        if (!ultraCleanMode) {
+            if (showBackToFeed) {
+                GlassIconButton(
+                    icon = Icons.Rounded.DynamicFeed,
+                    contentDescription = "Kembali ke Feed Scroll",
+                    onClick = onBackToFeed,
+                    sizeDp = 42,
+                    alpha = 0.42f,
+                    testTagName = "back_to_scroll_button"
+                )
+            }
+            GlassIconButton(
+                icon = if (isPaused) Icons.Rounded.PlayArrow else Icons.Rounded.Pause,
+                contentDescription = if (isPaused) "Play video" else "Pause video",
+                onClick = onTogglePlayPause,
+                isHighlighted = isPaused,
+                sizeDp = 42,
+                alpha = 0.42f,
+                testTagName = "play_pause_button"
+            )
+            GlassIconButton(
+                icon = if (isMuted) Icons.AutoMirrored.Rounded.VolumeOff else Icons.AutoMirrored.Rounded.VolumeUp,
+                contentDescription = stringResource(R.string.mute_cd),
+                onClick = onToggleMute,
+                isHighlighted = isMuted,
+                sizeDp = 42,
+                alpha = 0.42f,
+                testTagName = "mute_toggle_button"
+            )
+        }
+        GlassIconButton(
+            icon = Icons.Rounded.Tune,
+            contentDescription = stringResource(R.string.settings_cd),
+            onClick = onOpenSettings,
+            sizeDp = if (ultraCleanMode) 38 else 42,
+            alpha = if (ultraCleanMode) 0.30f else 0.44f,
+            testTagName = "open_settings_button"
+        )
+    }
+}
+
+@Composable
+private fun CleanStreamVideoPage(
     video: PublicVideo,
     isActivePage: Boolean,
     isPaused: Boolean,
     isMuted: Boolean,
-    isFirstPage: Boolean,
+    ultraCleanMode: Boolean,
     okHttpClient: OkHttpClient,
     onTogglePlayPause: () -> Unit,
-    onToggleMute: () -> Unit,
-    onSwitchSource: () -> Unit,
-    onOpenAiAssistant: () -> Unit,
-    onHashtagClick: (String) -> Unit,
     onFallbackToEmbed: (videoId: String, reason: String) -> Unit
 ) {
     var isBuffering by remember(video.id, video.playbackMode) { mutableStateOf(true) }
@@ -378,7 +301,7 @@ private fun VideoFeedPage(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(AmoledBlack)
+            .background(MaterialTheme.colorScheme.background)
             .testTag("video_page_${video.id}")
     ) {
         Box(
@@ -401,7 +324,7 @@ private fun VideoFeedPage(
                             onProgressChanged = { playbackProgress = it },
                             onBufferingChanged = { buffering -> isBuffering = buffering },
                             onStreamError = { reason ->
-                                onFallbackToEmbed(video.id, "$reason · Switched to Official Embed v3")
+                                onFallbackToEmbed(video.id, reason)
                             },
                             modifier = Modifier.fillMaxSize()
                         )
@@ -442,158 +365,56 @@ private fun VideoFeedPage(
             exit = fadeOut(),
             modifier = Modifier.align(Alignment.Center)
         ) {
-            GendevPulseLoader(
-                label = stringResource(R.string.loading_stream),
-                modifier = Modifier.testTag("video_buffering_indicator")
+            CircularProgressIndicator(
+                color = MaterialTheme.colorScheme.secondary,
+                trackColor = Color.White.copy(alpha = 0.12f),
+                strokeWidth = 2.5.dp,
+                modifier = Modifier
+                    .size(34.dp)
+                    .testTag("video_buffering_indicator")
             )
         }
 
-        // Bottom Glass Metadata + Minimalist Player Control Capsule (ZERO social buttons)
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .align(Alignment.BottomCenter)
-                .background(
-                    Brush.verticalGradient(
-                        colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.88f))
+        if (!ultraCleanMode) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .align(Alignment.BottomCenter)
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.65f))
+                        )
                     )
-                )
-                .navigationBarsPadding()
-                .padding(horizontal = 16.dp, vertical = 14.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.Bottom,
-                horizontalArrangement = Arrangement.SpaceBetween
+                    .navigationBarsPadding()
+                    .padding(start = 16.dp, end = 72.dp, top = 24.dp, bottom = 14.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                Column(
-                    modifier = Modifier
-                        .weight(1f)
-                        .padding(end = 12.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Text(
-                            text = "@${video.authorHandle}",
-                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                            color = PureWhite
-                        )
-                        Text(
-                            text = video.playbackMode.badgeText,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = NeonViolet,
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(6.dp))
-                                .background(DeepPlum.copy(alpha = 0.88f))
-                                .border(1.dp, DarkGlassBorder, RoundedCornerShape(6.dp))
-                                .padding(horizontal = 7.dp, vertical = 3.dp)
-                        )
-                    }
-
-                    if (video.title.isNotBlank()) {
-                        Text(
-                            text = video.title,
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = PureWhite.copy(alpha = 0.94f),
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-
-                    if (video.hashtags.isNotEmpty()) {
-                        FlowRow(
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            verticalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            video.hashtags.take(4).forEach { tag ->
-                                Text(
-                                    text = "#$tag",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = NeonViolet,
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(50))
-                                        .background(DarkGlassBg)
-                                        .border(1.dp, DarkGlassSubtleBorder, RoundedCornerShape(50))
-                                        .clickable { onHashtagClick(tag) }
-                                        .padding(horizontal = 10.dp, vertical = 5.dp)
-                                )
-                            }
-                        }
-                    }
-
-                    if (isFirstPage) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.KeyboardArrowUp,
-                                contentDescription = null,
-                                tint = MutedLavender,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Text(
-                                text = "Swipe up for next public video",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MutedLavender
-                            )
-                        }
-                    }
-                }
-
-                // Right-side Minimalist Player Control Capsule (AI, Play/Pause, Mute, Switch Source)
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    GlassIconButton(
-                        icon = Icons.Rounded.AutoAwesome,
-                        contentDescription = stringResource(R.string.ai_cd),
-                        onClick = onOpenAiAssistant,
-                        sizeDp = 48,
-                        testTagName = "video_ai_insight_button"
-                    )
-                    GlassIconButton(
-                        icon = if (isPaused) Icons.Rounded.PlayArrow else Icons.Rounded.Pause,
-                        contentDescription = if (isPaused) "Play video" else "Pause video",
-                        onClick = onTogglePlayPause,
-                        isHighlighted = isPaused,
-                        sizeDp = 52,
-                        testTagName = "play_pause_button"
-                    )
-                    GlassIconButton(
-                        icon = if (isMuted) Icons.AutoMirrored.Rounded.VolumeOff else Icons.AutoMirrored.Rounded.VolumeUp,
-                        contentDescription = stringResource(R.string.mute_cd),
-                        onClick = onToggleMute,
-                        isHighlighted = isMuted,
-                        sizeDp = 48,
-                        testTagName = "mute_toggle_button"
-                    )
-                    GlassIconButton(
-                        icon = Icons.Rounded.SwapHoriz,
-                        contentDescription = stringResource(R.string.switch_source_action),
-                        onClick = onSwitchSource,
-                        sizeDp = 48,
-                        testTagName = "quick_switch_source_button"
-                    )
-                }
-            }
-
-            if (video.playbackMode == PlaybackMode.EXO_DIRECT_STREAM) {
-                LinearProgressIndicator(
-                    progress = { playbackProgress },
-                    color = NeonViolet,
-                    trackColor = DarkGlassSubtleBorder,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(3.dp)
-                        .clip(RoundedCornerShape(50))
-                        .testTag("video_progress_bar")
+                Text(
+                    text = "@${video.authorHandle}",
+                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                    color = PureWhite
                 )
+                if (video.title.isNotBlank()) {
+                    Text(
+                        text = video.title,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = PureWhite.copy(alpha = 0.88f),
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                if (video.playbackMode == PlaybackMode.EXO_DIRECT_STREAM) {
+                    LinearProgressIndicator(
+                        progress = { playbackProgress },
+                        color = MaterialTheme.colorScheme.secondary,
+                        trackColor = DarkGlassSubtleBorder,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(2.5.dp)
+                            .clip(RoundedCornerShape(50))
+                            .testTag("video_progress_bar")
+                    )
+                }
             }
         }
     }

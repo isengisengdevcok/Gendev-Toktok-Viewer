@@ -22,6 +22,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -32,6 +35,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
@@ -39,10 +43,8 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
-import com.gendev.tiktokviewer.ui.components.GendevPulseLoader
-import com.gendev.tiktokviewer.ui.theme.AmoledBlack
 import com.gendev.tiktokviewer.ui.theme.DarkGlassSubtleBorder
-import com.gendev.tiktokviewer.ui.theme.NeonViolet
+import kotlinx.coroutines.delay
 
 private const val MOBILE_WEB_UA =
     "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36"
@@ -186,6 +188,7 @@ fun TikTokGuestScrollPlayer(
     val webView = remember {
         WebView(context).apply {
             setBackgroundColor(AndroidColor.BLACK)
+            setLayerType(android.view.View.LAYER_TYPE_HARDWARE, null)
             isVerticalScrollBarEnabled = false
             overScrollMode = android.view.View.OVER_SCROLL_NEVER
             layoutParams = ViewGroup.LayoutParams(
@@ -210,9 +213,11 @@ fun TikTokGuestScrollPlayer(
             webChromeClient = object : WebChromeClient() {
                 override fun onProgressChanged(view: WebView?, newProgress: Int) {
                     loadProgress = newProgress
-                    if (newProgress >= 75) {
-                        isInitialLoading = false
+                    if (newProgress >= 35) {
                         view?.evaluateJavascript(GUEST_CLEANUP_JS, null)
+                    }
+                    if (newProgress >= 45) {
+                        isInitialLoading = false
                     }
                 }
             }
@@ -289,9 +294,12 @@ fun TikTokGuestScrollPlayer(
 
     LaunchedEffect(targetUrl, reloadToken) {
         isInitialLoading = true
-        loadProgress = 15
+        loadProgress = 20
         webView.onResume()
         webView.loadUrl(targetUrl)
+        // Fast failsafe so spinner never blocks video rendering
+        delay(1_600L)
+        isInitialLoading = false
     }
 
     LaunchedEffect(isPaused, isMuted) {
@@ -336,7 +344,7 @@ fun TikTokGuestScrollPlayer(
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(AmoledBlack)
+            .background(MaterialTheme.colorScheme.background)
             .testTag("guest_scroll_player")
     ) {
         AndroidView(
@@ -344,15 +352,15 @@ fun TikTokGuestScrollPlayer(
             modifier = Modifier.fillMaxSize()
         )
 
-        if (loadProgress in 1..95) {
+        if (loadProgress in 1..92) {
             LinearProgressIndicator(
                 progress = { loadProgress / 100f },
-                color = NeonViolet,
+                color = MaterialTheme.colorScheme.secondary,
                 trackColor = DarkGlassSubtleBorder,
                 modifier = Modifier
                     .fillMaxWidth()
                     .statusBarsPadding()
-                    .height(2.5.dp)
+                    .height(2.dp)
                     .align(Alignment.TopCenter)
             )
         }
@@ -363,9 +371,13 @@ fun TikTokGuestScrollPlayer(
             exit = fadeOut(),
             modifier = Modifier.align(Alignment.Center)
         ) {
-            GendevPulseLoader(
-                label = "Membuka TikTok Scroll tanpa login...",
-                modifier = Modifier.testTag("guest_loading_indicator")
+            CircularProgressIndicator(
+                color = MaterialTheme.colorScheme.secondary,
+                trackColor = Color.White.copy(alpha = 0.12f),
+                strokeWidth = 2.5.dp,
+                modifier = Modifier
+                    .size(34.dp)
+                    .testTag("guest_loading_indicator")
             )
         }
     }
