@@ -1,0 +1,6 @@
+{
+  "name": "GENDEV TikTok Viewer",
+  "description": "Anonymous public TikTok video streaming viewer with hybrid multi-source resilience, anti-blocking circuit breaker, and zero-tracking privacy architecture.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
