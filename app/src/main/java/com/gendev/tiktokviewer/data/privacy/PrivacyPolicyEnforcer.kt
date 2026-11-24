@@ -70,6 +70,17 @@ object PrivacyPolicyEnforcer {
             .build()
     }
 
+    /**
+     * Dedicated privacy-hardened HTTP client for Media3 ExoPlayer streaming with longer read
+     * timeouts so mobile video buffering does not drop mid-stream.
+     */
+    fun createStreamingOkHttpClient(): OkHttpClient {
+        return createPrivacyOkHttpClient(
+            connectTimeoutMs = 8_000L,
+            readTimeoutMs = 20_000L
+        )
+    }
+
     private class PrivacySanitizingInterceptor : Interceptor {
         override fun intercept(chain: Interceptor.Chain): Response {
             val original = chain.request()

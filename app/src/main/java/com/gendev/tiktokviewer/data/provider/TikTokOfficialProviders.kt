@@ -14,6 +14,7 @@ import com.gendev.tiktokviewer.domain.provider.TikTokFeedProvider
 import com.gendev.tiktokviewer.domain.provider.TikTokPlaybackProvider
 import com.gendev.tiktokviewer.domain.provider.TikTokSearchProvider
 import com.gendev.tiktokviewer.domain.provider.TikTokVideoProvider
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -24,19 +25,20 @@ import okhttp3.Request
 import java.net.URLEncoder
 
 /**
- * Official TikTok oEmbed + Official Embed v2 provider.
+ * Official TikTok oEmbed + Official Embed v3 provider.
  * Resolves public video metadata using https://www.tiktok.com/oembed without cookies or login.
  */
 class TikTokOEmbedVideoProvider(
     private val oEmbedService: TikTokOEmbedService,
-    private val okHttpClient: OkHttpClient
+    private val okHttpClient: OkHttpClient,
+    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO
 ) : TikTokVideoProvider {
 
     override val providerId: String = "tiktok_oembed"
     override val sourceKind: VideoSourceKind = VideoSourceKind.TIKTOK_OEMBED
 
     override suspend fun resolveVideoByUrlOrId(urlOrId: String): ProviderResult<PublicVideo> =
-        withContext(Dispatchers.IO) {
+        withContext(ioDispatcher) {
             val resolvedInput = if (TikTokLinkParser.isShortTikTokUrl(urlOrId)) {
                 resolveShortRedirect(urlOrId) ?: urlOrId
             } else {
@@ -90,25 +92,17 @@ class TikTokOEmbedVideoProvider(
                     )
                 }
 
-                // If oEmbed returns 400/404 for an ID-only canonical URL, allow Official Embed v3 attempt
-                ProviderResult.Success(
-                    data = PublicVideo(
-                        id = parsed.videoId,
-                        title = "Public TikTok Video #${parsed.videoId.takeLast(6)}",
-                        authorHandle = parsed.authorHandle ?: "public",
-                        authorDisplayName = "@${parsed.authorHandle ?: "public"}",
-                        hashtags = emptyList(),
-                        thumbnailUrl = null,
-                        directMediaUrl = null,
-                        embedUrl = parsed.embedUrl,
-                        canonicalUrl = parsed.canonicalUrl,
-                        sourceKind = VideoSourceKind.TIKTOK_EMBED_PLAYER,
-                        sourceLabel = "TikTok Official Embed v3",
-                        playbackMode = PlaybackMode.ISOLATED_EMBED_WEBVIEW
-                    ),
-                    sourceKind = VideoSourceKind.TIKTOK_EMBED_PLAYER,
-                    endpoint = "TikTok Official Embed v3"
-                )
+                if (response.code() >= 500) {
+                    ProviderResult.NetworkError(
+                        endpoint = "TikTok Official oEmbed",
+                        message = "Upstream returned HTTP ${response.code()}",
+                        causeType = "HTTP_${response.code()}"
+                    )
+                } else {
+                    ProviderResult.ContentUnavailable(
+                        "Public video metadata unavailable on oEmbed (HTTP ${response.code()})."
+                    )
+                }
             } catch (t: Throwable) {
                 ProviderResult.NetworkError(
                     endpoint = "TikTok Official oEmbed",
@@ -135,7 +129,8 @@ class TikTokOEmbedVideoProvider(
  */
 class TikTokPublicContentAdapter(
     private val oEmbedVideoProvider: TikTokOEmbedVideoProvider,
-    private val okHttpClient: OkHttpClient
+    private val okHttpClient: OkHttpClient,
+    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO
 ) : TikTokFeedProvider, TikTokSearchProvider {
 
     override val providerId: String = "tiktok_public_adapter"
@@ -216,7 +211,7 @@ class TikTokPublicContentAdapter(
     }
 
     override suspend fun searchHashtag(hashtag: String): ProviderResult<List<PublicVideo>> =
-        withContext(Dispatchers.IO) {
+        withContext(ioDispatcher) {
             val clean = hashtag.trim().removePrefix("#").replace(Regex("[^A-Za-z0-9_]"), "")
             if (clean.isBlank()) {
                 return@withContext ProviderResult.ContentUnavailable("Enter a valid public #hashtag.")
@@ -226,7 +221,7 @@ class TikTokPublicContentAdapter(
         }
 
     override suspend fun searchCreator(username: String): ProviderResult<List<PublicVideo>> =
-        withContext(Dispatchers.IO) {
+        withContext(ioDispatcher) {
             val clean = username.trim().removePrefix("@").replace(Regex("[^A-Za-z0-9_.]"), "")
             if (clean.isBlank()) {
                 return@withContext ProviderResult.ContentUnavailable("Enter a valid public @creator handle.")

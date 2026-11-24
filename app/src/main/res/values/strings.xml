@@ -10,13 +10,14 @@
     <string name="mute_cd">Mute or unmute video</string>
     <string name="search_cd">Open public search</string>
     <string name="resilience_cd">Source health and privacy shield</string>
+    <string name="ai_cd">Open Google AI Smart Scroll</string>
     <string name="back_cd">Navigate back</string>
     <string name="clear_cd">Clear search input</string>
     <string name="loading_stream">Resolving public stream...</string>
     <string name="captcha_title">Verification Required by Upstream</string>
-    <string name="captcha_body">The upstream provider requested a human verification challenge (CAPTCHA). GENDEV Viewer never bypasses CAPTCHAs automatically. Try switching to another public source or open a different video.</string>
+    <string name="captcha_body">The upstream provider requested a human verification challenge (CAPTCHA). GENDEV Viewer never bypasses CAPTCHAs automatically. Try switching to Guest Scroll or another public source.</string>
     <string name="forbidden_title">Access Restricted (HTTP 403)</string>
-    <string name="forbidden_body">This upstream endpoint denied direct access or the content is restricted/private. Switching to official Embed or alternate ProxiTok node is recommended.</string>
+    <string name="forbidden_body">This upstream endpoint denied direct access or the content is restricted/private. Switch to Guest Scroll or alternate ProxiTok node.</string>
     <string name="rate_limit_title">Cooldown Active (HTTP 429)</string>
-    <string name="rate_limit_body">Rate limit reached on this endpoint. Automatic requests have paused to respect upstream limits. Tap Retry after cooldown or switch provider.</string>
+    <string name="rate_limit_body">Rate limit reached on this endpoint. Automatic requests have paused to respect upstream limits. Tap Retry after cooldown or switch to Guest Scroll.</string>
 </resources>

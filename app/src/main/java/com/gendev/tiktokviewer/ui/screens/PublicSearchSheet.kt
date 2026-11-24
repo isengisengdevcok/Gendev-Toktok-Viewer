@@ -86,6 +86,7 @@ fun PublicSearchSheet(
     onClose: () -> Unit,
     onSearch: (query: String, mode: SearchMode) -> Unit,
     onSelectVideo: (PublicVideo, List<PublicVideo>) -> Unit,
+    onOpenInGuestScroll: ((String) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     BackHandler(onBack = onClose)
@@ -303,7 +304,10 @@ fun PublicSearchSheet(
                             isRateLimited = searchState.isRateLimited,
                             isForbidden = false,
                             onRetry = { onSearch(queryText, selectedMode) },
-                            onSwitchSource = { onSearch(queryText, selectedMode) }
+                            onSwitchSource = { onSearch(queryText, selectedMode) },
+                            onOpenGuestScroll = onOpenInGuestScroll?.let { openGuest ->
+                                { openGuest(queryText.ifBlank { "#fyp" }) }
+                            }
                         )
                     }
                 }

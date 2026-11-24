@@ -19,6 +19,9 @@ import com.gendev.tiktokviewer.domain.provider.TikTokVideoProvider
 import com.squareup.moshi.Moshi
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -45,6 +48,8 @@ class TikWmPublicProvider(
     private val searchAdapter = moshi.adapter(TikWmSearchResponse::class.java)
     private val userPostsAdapter = moshi.adapter(TikWmUserPostsResponse::class.java)
     private val singleAdapter = moshi.adapter(TikWmSingleResponse::class.java)
+    private val requestMutex = Mutex()
+    private var lastRequestAtMs: Long = 0L
 
     override suspend fun fetchTrendingFeed(cursor: String?): ProviderResult<FeedPage> = withContext(ioDispatcher) {
         val region = "ID"
@@ -216,19 +221,25 @@ class TikWmPublicProvider(
         data class Failure(val result: ProviderResult<Nothing>) : JsonFetchResult()
     }
 
-    private fun executeJsonGet(url: String): JsonFetchResult {
+    private suspend fun executeJsonGet(url: String): JsonFetchResult {
         if (!PrivacyPolicyEnforcer.isSafeHttpsUrl(url)) {
             return JsonFetchResult.Failure(
                 ProviderResult.NetworkError(displayLabel, "HTTPS required", "HTTPS_REQUIRED")
             )
         }
-        return try {
-            val request = Request.Builder()
-                .url(url)
-                .header("Accept", "application/json")
-                .get()
-                .build()
-            okHttpClient.newCall(request).execute().use { response ->
+        return requestMutex.withLock {
+            val elapsed = System.currentTimeMillis() - lastRequestAtMs
+            if (lastRequestAtMs > 0L && elapsed in 0..1_099L) {
+                delay(1_100L - elapsed)
+            }
+            lastRequestAtMs = System.currentTimeMillis()
+            try {
+                val request = Request.Builder()
+                    .url(url)
+                    .header("Accept", "application/json")
+                    .get()
+                    .build()
+                okHttpClient.newCall(request).execute().use { response ->
                 val body = response.body?.string().orEmpty()
                 val restriction = UpstreamBlockDetector.detectRestriction(
                     statusCode = response.code,
@@ -250,14 +261,15 @@ class TikWmPublicProvider(
                 }
                 JsonFetchResult.Success(body)
             }
-        } catch (t: Throwable) {
-            JsonFetchResult.Failure(
-                ProviderResult.NetworkError(
-                    endpoint = displayLabel,
-                    message = "Connection error on $displayLabel (${t.javaClass.simpleName})",
-                    causeType = t.javaClass.simpleName
+            } catch (t: Throwable) {
+                JsonFetchResult.Failure(
+                    ProviderResult.NetworkError(
+                        endpoint = displayLabel,
+                        message = "Connection error on $displayLabel (${t.javaClass.simpleName})",
+                        causeType = t.javaClass.simpleName
+                    )
                 )
-            )
+            }
         }
     }
 

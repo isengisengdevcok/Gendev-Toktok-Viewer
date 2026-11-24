@@ -26,12 +26,12 @@ All providers sit behind clean, swappable interfaces (`com.gendev.tiktokviewer.d
 - `TikTokPlaybackProvider`
 - `TikTokFallbackManager`
 
-### Supported Sources
-1. **Self-Hosted ProxiTok Instance** (configurable HTTPS URL inside Privacy & Resilience Shield)
-2. **TikTok Public Content Adapter (TikWM JSON)** (`https://www.tikwm.com/api/`) for public trending feeds, `#hashtag`, `@creator`, and direct HTTPS Media3 streams
-3. **Open-Source ProxiTok Public Instances** (dynamically synced from `pablouser1/ProxiTok/master/instances.json` using `/trending/rss`, `/tag/{tag}/rss`, `/@{user}/rss`)
-4. **TikTok Official oEmbed API** (`https://www.tiktok.com/oembed`)
-5. **TikTok Official Embed v3 Player** (`https://www.tiktok.com/embed/v3/{videoId}`) rendered inside a cookie-disabled, storage-disabled `IsolatedEmbedPlayer` WebView.
+### Supported Playback & Discovery Engines
+1. **TikTok Guest Scroll Mode (`Scroll`)** — Lightweight, login-free public scroll player (`https://www.tiktok.com/explore` / `foryou` / `#tag` / `@creator`) that blocks `/login`, `/signup`, and app-store hijacks while cleaning intrusive modal popups for uninterrupted vertical scrolling. Automatically engages if stream APIs are throttled.
+2. **TikTok Public Content Adapter (TikWM JSON)** (`https://www.tikwm.com/api/`) with request pacing (`1.1s`) for public feeds, `#hashtag`, `@creator`, and direct HTTPS Media3 `ExoPlayer` streams.
+3. **Open-Source & Self-Hosted ProxiTok Instances** (`pablouser1/ProxiTok` + custom HTTPS URL inside Privacy & Resilience Shield).
+4. **TikTok Official oEmbed + Embed v3 Player** (`https://www.tiktok.com/oembed`, `https://www.tiktok.com/embed/v3/{videoId}`) rendered inside `IsolatedEmbedPlayer`.
+5. **Google Gemini AI Smart Scroll (`Firebase.ai` · `gemini-3.8-flash`)** — Stateless natural-language topic/vibe discovery (`Schema.obj`) and streaming Indonesian caption summaries with App Check attestation (zero API key, zero saved history).
 
 ---
 
@@ -39,10 +39,11 @@ All providers sit behind clean, swappable interfaces (`com.gendev.tiktokviewer.d
 
 GENDEV TikTok Viewer implements **access resilience**, never DRM circumvention or CAPTCHA bypass:
 
+- **Automatic Guest Scroll Fallback**: If upstream JSON/ProxiTok APIs return HTTP 429, 403, or network errors, the app seamlessly shifts into login-free Guest Scroll instead of stranding the user on an error screen.
 - **Per-Endpoint Circuit Breaker** (`CLOSED`, `OPEN`, `HALF_OPEN`)
 - **Exponential Backoff** for transient network errors only
 - **Immediate Loop Prevention on HTTP 429**: Respects `Retry-After` cooldowns without hammering endpoints
-- **Transparent HTTP 403 / CAPTCHA Handling**: Immediately halts retries, surfaces an informative status card, and offers manual **Retry** or **Switch Source**
+- **Transparent HTTP 403 / CAPTCHA Handling**: Immediately halts retries, surfaces an informative status card, and offers manual **Retry**, **Switch**, or **Buka Mode Scroll**
 - **Live HTTPS Health Checks** & one-tap endpoint rotation
 
 ---

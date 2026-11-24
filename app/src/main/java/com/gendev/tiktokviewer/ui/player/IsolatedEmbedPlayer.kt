@@ -9,6 +9,7 @@ import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
+import android.webkit.WebStorage
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.foundation.background
@@ -25,10 +26,11 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.gendev.tiktokviewer.ui.theme.AmoledBlack
+import kotlinx.coroutines.delay
 
 /**
  * Isolated WebView player restricted strictly to TikTok Official Embed URLs.
- * Disables cookies, persistent DOM storage, and blocks redirects to login/tracking pages.
+ * Keeps ephemeral DOM storage for JS player compatibility and wipes cookies/storage on disposal.
  */
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
@@ -48,6 +50,7 @@ fun IsolatedEmbedPlayer(
         setOf(
             "www.tiktok.com",
             "tiktok.com",
+            "m.tiktok.com",
             "lf16-tiktok-web.ttwstatic.com",
             "sf16-website-login.neutral.ttwstatic.com"
         )
@@ -61,13 +64,6 @@ fun IsolatedEmbedPlayer(
     }
 
     val webView = remember(embedUrl) {
-        runCatching {
-            CookieManager.getInstance().apply {
-                setAcceptCookie(false)
-                removeAllCookies(null)
-            }
-        }
-
         WebView(context).apply {
             setBackgroundColor(AndroidColor.BLACK)
             layoutParams = ViewGroup.LayoutParams(
@@ -76,11 +72,11 @@ fun IsolatedEmbedPlayer(
             )
             settings.apply {
                 javaScriptEnabled = true
-                domStorageEnabled = false
+                domStorageEnabled = true
                 databaseEnabled = false
                 allowFileAccess = false
                 allowContentAccess = false
-                cacheMode = WebSettings.LOAD_NO_CACHE
+                cacheMode = WebSettings.LOAD_DEFAULT
                 mediaPlaybackRequiresUserGesture = false
                 mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
                 useWideViewPort = true
@@ -95,17 +91,25 @@ fun IsolatedEmbedPlayer(
                     request: WebResourceRequest?
                 ): Boolean {
                     val uri = request?.url ?: return true
-                    if (uri.scheme != "https") return true
+                    val scheme = uri.scheme?.lowercase().orEmpty()
+                    if (scheme == "about" || scheme == "blob") return false
+                    if (scheme != "https") return true
                     val host = uri.host?.lowercase().orEmpty()
                     val path = uri.path?.lowercase().orEmpty()
-                    if (path.contains("login") || path.contains("signup")) {
+                    if (path.contains("login") || path.contains("signup") || path.contains("passport")) {
                         return true
                     }
                     val permitted = host in allowedHosts ||
                         host.endsWith(".tiktokcdn.com") ||
+                        host.endsWith(".tiktokcdn-us.com") ||
                         host.endsWith(".tiktokv.com") ||
-                        host.endsWith(".ttwstatic.com")
+                        host.endsWith(".ttwstatic.com") ||
+                        host.endsWith(".ibytedtos.com")
                     return !permitted
+                }
+
+                override fun onPageCommitVisible(view: WebView?, url: String?) {
+                    onLoadingChanged(false)
                 }
 
                 override fun onPageFinished(view: WebView?, url: String?) {
@@ -148,6 +152,8 @@ fun IsolatedEmbedPlayer(
             onLoadingChanged(true)
             webView.onResume()
             webView.loadUrl(effectiveUrl)
+            delay(5_500L)
+            onLoadingChanged(false)
         } else {
             webView.onPause()
             webView.loadUrl("about:blank")
@@ -185,6 +191,10 @@ fun IsolatedEmbedPlayer(
             webView.stopLoading()
             webView.clearHistory()
             webView.clearCache(true)
+            runCatching {
+                CookieManager.getInstance().removeAllCookies(null)
+                WebStorage.getInstance().deleteAllData()
+            }
             webView.removeAllViews()
             webView.destroy()
         }

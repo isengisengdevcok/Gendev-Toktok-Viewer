@@ -172,6 +172,51 @@ fun SourceIndicatorPill(
 }
 
 @Composable
+fun EngineModeSwitcher(
+    isGuestScroll: Boolean,
+    onSelectGuestScroll: () -> Unit,
+    onSelectNativeStream: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier
+            .clip(RoundedCornerShape(50))
+            .background(DarkGlassBg)
+            .border(1.dp, DarkGlassSubtleBorder, RoundedCornerShape(50))
+            .padding(3.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(2.dp)
+    ) {
+        Surface(
+            onClick = onSelectGuestScroll,
+            shape = RoundedCornerShape(50),
+            color = if (isGuestScroll) ElectricPurple else Color.Transparent,
+            modifier = Modifier.testTag("mode_guest_scroll_button")
+        ) {
+            Text(
+                text = "Scroll",
+                style = MaterialTheme.typography.labelMedium,
+                color = if (isGuestScroll) PureWhite else MutedLavender,
+                modifier = Modifier.padding(horizontal = 11.dp, vertical = 6.dp)
+            )
+        }
+        Surface(
+            onClick = onSelectNativeStream,
+            shape = RoundedCornerShape(50),
+            color = if (!isGuestScroll) ElectricPurple else Color.Transparent,
+            modifier = Modifier.testTag("mode_native_stream_button")
+        ) {
+            Text(
+                text = "Stream",
+                style = MaterialTheme.typography.labelMedium,
+                color = if (!isGuestScroll) PureWhite else MutedLavender,
+                modifier = Modifier.padding(horizontal = 11.dp, vertical = 6.dp)
+            )
+        }
+    }
+}
+
+@Composable
 fun GlassIconButton(
     icon: ImageVector,
     contentDescription: String,
@@ -340,6 +385,7 @@ fun ResilientErrorCard(
     isForbidden: Boolean,
     onRetry: () -> Unit,
     onSwitchSource: () -> Unit,
+    onOpenGuestScroll: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val accentColor = when {
@@ -436,6 +482,19 @@ fun ResilientErrorCard(
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text("Retry")
+                }
+            }
+            if (onOpenGuestScroll != null) {
+                Spacer(modifier = Modifier.height(10.dp))
+                OutlinedButton(
+                    onClick = onOpenGuestScroll,
+                    border = BorderStroke(1.dp, ElectricPurple.copy(alpha = 0.6f)),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .minimumInteractiveComponentSize()
+                        .testTag("fallback_guest_scroll_button")
+                ) {
+                    Text("Buka Mode Scroll Tanpa Login", color = NeonViolet)
                 }
             }
         }

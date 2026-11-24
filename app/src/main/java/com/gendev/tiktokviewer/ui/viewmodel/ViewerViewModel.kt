@@ -4,17 +4,29 @@ import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.gendev.tiktokviewer.ai.AiVibeState
+import com.gendev.tiktokviewer.ai.AiVibeSuggestion
+import com.gendev.tiktokviewer.ai.AiVideoInsightState
+import com.gendev.tiktokviewer.ai.GeminiScrollAssistant
 import com.gendev.tiktokviewer.data.repository.HybridTikTokRepository
 import com.gendev.tiktokviewer.domain.model.EndpointHealth
+import com.gendev.tiktokviewer.domain.model.FeedPage
 import com.gendev.tiktokviewer.domain.model.PlaybackMode
 import com.gendev.tiktokviewer.domain.model.PrivacyConfig
 import com.gendev.tiktokviewer.domain.model.ProviderResult
 import com.gendev.tiktokviewer.domain.model.PublicVideo
 import com.gendev.tiktokviewer.domain.model.SearchMode
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+
+enum class ViewerEngineMode {
+    GUEST_SCROLL,
+    NATIVE_STREAM
+}
 
 sealed interface FeedUiState {
     data class Loading(val sourceHint: String) : FeedUiState
@@ -52,8 +64,18 @@ sealed interface SearchUiState {
 }
 
 class ViewerViewModel(
-    private val repository: HybridTikTokRepository
+    private val repository: HybridTikTokRepository,
+    private val aiAssistant: GeminiScrollAssistant? = null
 ) : ViewModel() {
+
+    private val _viewerEngineMode = MutableStateFlow(ViewerEngineMode.NATIVE_STREAM)
+    val viewerEngineMode: StateFlow<ViewerEngineMode> = _viewerEngineMode.asStateFlow()
+
+    private val _guestUrl = MutableStateFlow("https://www.tiktok.com/explore")
+    val guestUrl: StateFlow<String> = _guestUrl.asStateFlow()
+
+    private val _guestReloadToken = MutableStateFlow(0)
+    val guestReloadToken: StateFlow<Int> = _guestReloadToken.asStateFlow()
 
     private val _feedState = MutableStateFlow<FeedUiState>(FeedUiState.Loading("Menghubungkan ke stream publik..."))
     val feedState: StateFlow<FeedUiState> = _feedState.asStateFlow()
@@ -79,6 +101,15 @@ class ViewerViewModel(
     private val _isResilienceOpen = MutableStateFlow(false)
     val isResilienceOpen: StateFlow<Boolean> = _isResilienceOpen.asStateFlow()
 
+    private val _isAiSheetOpen = MutableStateFlow(false)
+    val isAiSheetOpen: StateFlow<Boolean> = _isAiSheetOpen.asStateFlow()
+
+    private val _aiVibeState = MutableStateFlow<AiVibeState>(AiVibeState.Idle)
+    val aiVibeState: StateFlow<AiVibeState> = _aiVibeState.asStateFlow()
+
+    private val _aiInsightState = MutableStateFlow<AiVideoInsightState>(AiVideoInsightState.Idle)
+    val aiInsightState: StateFlow<AiVideoInsightState> = _aiInsightState.asStateFlow()
+
     private val _cacheCount = MutableStateFlow(0)
     val cacheCount: StateFlow<Int> = _cacheCount.asStateFlow()
 
@@ -88,35 +119,70 @@ class ViewerViewModel(
     val endpointHealth: StateFlow<List<EndpointHealth>> = repository.endpointHealthFlow
     val privacyConfig: StateFlow<PrivacyConfig> = repository.privacyConfig
     val okHttpClient = repository.okHttpClient
+    val streamingOkHttpClient = repository.streamingOkHttpClient
+
+    private var insightJob: Job? = null
 
     init {
         loadFeed(forceRefresh = false)
     }
 
+    fun switchEngineMode(mode: ViewerEngineMode) {
+        _viewerEngineMode.value = mode
+        _isPaused.value = false
+        if (mode == ViewerEngineMode.GUEST_SCROLL) {
+            _guestUrl.value = repository.buildGuestScrollUrl(_selectedTopic.value)
+        } else if (_feedState.value !is FeedUiState.Ready) {
+            loadFeed(forceRefresh = true)
+        }
+    }
+
+    fun openGuestScroll(topicOrQuery: String = _selectedTopic.value) {
+        _guestUrl.value = repository.buildGuestScrollUrl(topicOrQuery)
+        _guestReloadToken.value += 1
+        _viewerEngineMode.value = ViewerEngineMode.GUEST_SCROLL
+        _isPaused.value = false
+        _isSearchOpen.value = false
+        _isAiSheetOpen.value = false
+    }
+
+    fun reloadGuestScroll() {
+        _guestReloadToken.value += 1
+    }
+
     fun loadFeed(forceRefresh: Boolean = false) {
         viewModelScope.launch {
             _isPaused.value = false
-            _feedState.value = FeedUiState.Loading("TikWM · ProxiTok · Official Embed v3")
+            _feedState.value = FeedUiState.Loading("Menghubungkan stream publik...")
             val res = repository.loadPublicFeed(forceRefresh)
-            applyFeedResult(res)
+            applyFeedResult(res, autoFallbackToGuestOnFailure = true)
         }
     }
 
     fun selectTopic(topic: String) {
         _selectedTopic.value = topic
         _isPaused.value = false
+        if (_viewerEngineMode.value == ViewerEngineMode.GUEST_SCROLL) {
+            _guestUrl.value = repository.buildGuestScrollUrl(topic)
+            _guestReloadToken.value += 1
+            return
+        }
         viewModelScope.launch {
             _feedState.value = FeedUiState.Loading("Memuat $topic secara anonim...")
             val res = repository.loadTopicFeed(topic)
-            applyFeedResult(res)
+            applyFeedResult(res, autoFallbackToGuestOnFailure = true)
         }
     }
 
-    private fun applyFeedResult(res: ProviderResult<com.gendev.tiktokviewer.domain.model.FeedPage>) {
+    private fun applyFeedResult(
+        res: ProviderResult<FeedPage>,
+        autoFallbackToGuestOnFailure: Boolean
+    ) {
         when (res) {
             is ProviderResult.Success -> {
                 _currentVideoIndex.value = 0
                 _isPaused.value = false
+                _viewerEngineMode.value = ViewerEngineMode.NATIVE_STREAM
                 _feedState.value = FeedUiState.Ready(
                     videos = res.data.videos,
                     activeSourceLabel = res.endpoint,
@@ -125,40 +191,68 @@ class ViewerViewModel(
                 _cacheCount.value = repository.cacheEntryCount()
             }
             is ProviderResult.RateLimited -> {
-                _feedState.value = FeedUiState.Error(
-                    title = "Rate Limit Cooldown (HTTP 429)",
-                    message = res.message,
-                    isRateLimited = true,
-                    retryAfterSeconds = res.retryAfterSeconds
-                )
+                if (autoFallbackToGuestOnFailure) {
+                    activateSeamlessGuestFallback("Stream dibatasi sementara — otomatis beralih ke Mode Scroll")
+                } else {
+                    _feedState.value = FeedUiState.Error(
+                        title = "Rate Limit Cooldown (HTTP 429)",
+                        message = res.message,
+                        isRateLimited = true,
+                        retryAfterSeconds = res.retryAfterSeconds
+                    )
+                }
             }
             is ProviderResult.AccessRestricted -> {
-                _feedState.value = FeedUiState.Error(
-                    title = if (res.isCaptcha) "Verification Required (CAPTCHA)" else "Access Restricted (HTTP ${res.statusCode})",
-                    message = res.message,
-                    isCaptcha = res.isCaptcha,
-                    isForbidden = !res.isCaptcha
-                )
+                if (autoFallbackToGuestOnFailure && !res.isCaptcha) {
+                    activateSeamlessGuestFallback("Otomatis beralih ke Mode Scroll Tanpa Login")
+                } else {
+                    _feedState.value = FeedUiState.Error(
+                        title = if (res.isCaptcha) "Verification Required (CAPTCHA)" else "Access Restricted (HTTP ${res.statusCode})",
+                        message = res.message,
+                        isCaptcha = res.isCaptcha,
+                        isForbidden = !res.isCaptcha
+                    )
+                }
             }
             is ProviderResult.NetworkError -> {
-                _feedState.value = FeedUiState.Error(
-                    title = "Koneksi Server Bermasalah",
-                    message = "${res.message}. Ketuk Switch untuk rotasi sumber atau periksa koneksi internet."
-                )
+                if (autoFallbackToGuestOnFailure) {
+                    activateSeamlessGuestFallback("Stream API sibuk — otomatis beralih ke Mode Scroll")
+                } else {
+                    _feedState.value = FeedUiState.Error(
+                        title = "Koneksi Server Bermasalah",
+                        message = "${res.message}. Ketuk Switch atau gunakan Mode Scroll."
+                    )
+                }
             }
             is ProviderResult.ContentUnavailable -> {
-                _feedState.value = FeedUiState.Error(
-                    title = "Stream Tidak Tersedia",
-                    message = res.message
-                )
+                if (autoFallbackToGuestOnFailure) {
+                    activateSeamlessGuestFallback("Beralih ke Mode Scroll Tanpa Login")
+                } else {
+                    _feedState.value = FeedUiState.Error(
+                        title = "Stream Tidak Tersedia",
+                        message = res.message
+                    )
+                }
             }
         }
+    }
+
+    private fun activateSeamlessGuestFallback(notice: String) {
+        _guestUrl.value = repository.buildGuestScrollUrl(_selectedTopic.value)
+        _guestReloadToken.value += 1
+        _viewerEngineMode.value = ViewerEngineMode.GUEST_SCROLL
+        _bannerMessage.value = notice
+        _feedState.value = FeedUiState.Error(
+            title = "Stream API Sedang Sibuk",
+            message = notice
+        )
     }
 
     fun onPageSelected(index: Int) {
         if (index >= 0) {
             _currentVideoIndex.value = index
             _isPaused.value = false
+            _aiInsightState.value = AiVideoInsightState.Idle
         }
     }
 
@@ -188,6 +282,79 @@ class ViewerViewModel(
     fun closeResilienceSheet() {
         _isResilienceOpen.value = false
         _isPaused.value = false
+    }
+
+    fun openAiSheet() {
+        _isPaused.value = true
+        _isAiSheetOpen.value = true
+    }
+
+    fun closeAiSheet() {
+        _isAiSheetOpen.value = false
+        _isPaused.value = false
+    }
+
+    fun askAiVibe(prompt: String) {
+        val assistant = aiAssistant ?: run {
+            _aiVibeState.value = AiVibeState.Error("Gemini AI belum dikonfigurasi pada build ini.")
+            return
+        }
+        val clean = prompt.trim()
+        if (clean.isEmpty()) return
+        viewModelScope.launch {
+            _aiVibeState.value = AiVibeState.Loading(clean)
+            try {
+                val suggestion = assistant.buildVibeDiscovery(clean)
+                _aiVibeState.value = AiVibeState.Ready(suggestion)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _aiVibeState.value = AiVibeState.Error(
+                    e.localizedMessage ?: "Gagal memproses permintaan Gemini AI."
+                )
+            }
+        }
+    }
+
+    fun applyAiVibeToGuestScroll(suggestion: AiVibeSuggestion) {
+        _selectedTopic.value = "#${suggestion.guestTopicTag}"
+        openGuestScroll("#${suggestion.guestTopicTag}")
+    }
+
+    fun applyAiVibeToStream(suggestion: AiVibeSuggestion) {
+        _selectedTopic.value = "#${suggestion.guestTopicTag}"
+        _isAiSheetOpen.value = false
+        _viewerEngineMode.value = ViewerEngineMode.NATIVE_STREAM
+        viewModelScope.launch {
+            _feedState.value = FeedUiState.Loading("Gemini AI: ${suggestion.vibeLabel}...")
+            when (val res = repository.searchPublic(suggestion.searchQuery, SearchMode.KEYWORD)) {
+                is ProviderResult.Success -> {
+                    _currentVideoIndex.value = 0
+                    _isPaused.value = false
+                    _feedState.value = FeedUiState.Ready(
+                        videos = res.data,
+                        activeSourceLabel = "${res.endpoint} · AI",
+                        noticeMessage = "Dikurasi AI: ${suggestion.vibeLabel}"
+                    )
+                }
+                else -> {
+                    openGuestScroll("#${suggestion.guestTopicTag}")
+                }
+            }
+        }
+    }
+
+    fun summarizeCurrentVideo(video: PublicVideo) {
+        val assistant = aiAssistant ?: run {
+            _aiInsightState.value = AiVideoInsightState.Error("Gemini AI belum dikonfigurasi.")
+            return
+        }
+        insightJob?.cancel()
+        insightJob = viewModelScope.launch {
+            assistant.streamVideoInsight(video).collect { state ->
+                _aiInsightState.value = state
+            }
+        }
     }
 
     fun clearBanner() {
@@ -247,6 +414,7 @@ class ViewerViewModel(
 
     fun selectSearchVideo(video: PublicVideo, contextList: List<PublicVideo>) {
         val ordered = listOf(video) + contextList.filter { it.id != video.id }
+        _viewerEngineMode.value = ViewerEngineMode.NATIVE_STREAM
         _feedState.value = FeedUiState.Ready(
             videos = ordered,
             activeSourceLabel = video.sourceLabel,
@@ -259,6 +427,7 @@ class ViewerViewModel(
 
     fun openDeepLink(url: String) {
         viewModelScope.launch {
+            _viewerEngineMode.value = ViewerEngineMode.NATIVE_STREAM
             _feedState.value = FeedUiState.Loading("Membuka tautan publik secara anonim...")
             when (val res = repository.resolveVideoLink(url)) {
                 is ProviderResult.Success -> {
@@ -270,27 +439,11 @@ class ViewerViewModel(
                     _currentVideoIndex.value = 0
                     _isPaused.value = false
                 }
-                is ProviderResult.RateLimited -> {
-                    _feedState.value = FeedUiState.Error(
-                        title = "Cooldown Active (HTTP 429)",
-                        message = res.message,
-                        isRateLimited = true,
-                        retryAfterSeconds = res.retryAfterSeconds
-                    )
-                }
-                is ProviderResult.AccessRestricted -> {
-                    _feedState.value = FeedUiState.Error(
-                        title = if (res.isCaptcha) "CAPTCHA Challenge" else "Restricted (HTTP ${res.statusCode})",
-                        message = res.message,
-                        isCaptcha = res.isCaptcha,
-                        isForbidden = !res.isCaptcha
-                    )
-                }
-                is ProviderResult.NetworkError -> {
-                    _feedState.value = FeedUiState.Error("Link Resolution Error", res.message)
-                }
+                is ProviderResult.RateLimited,
+                is ProviderResult.AccessRestricted,
+                is ProviderResult.NetworkError,
                 is ProviderResult.ContentUnavailable -> {
-                    _feedState.value = FeedUiState.Error("Unsupported or Unavailable Link", res.message)
+                    openGuestScroll(url)
                 }
             }
         }
@@ -350,10 +503,13 @@ class ViewerViewModel(
         _bannerMessage.value = "Ephemeral cache & WebView data wiped"
     }
 
-    class Factory(private val repository: HybridTikTokRepository) : ViewModelProvider.Factory {
+    class Factory(
+        private val repository: HybridTikTokRepository,
+        private val aiAssistant: GeminiScrollAssistant? = null
+    ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
-            return ViewerViewModel(repository) as T
+            return ViewerViewModel(repository, aiAssistant) as T
         }
     }
 }

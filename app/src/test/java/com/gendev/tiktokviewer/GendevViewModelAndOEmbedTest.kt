@@ -1,5 +1,9 @@
 package com.gendev.tiktokviewer
 
+import com.gendev.tiktokviewer.ai.AiVibeState
+import com.gendev.tiktokviewer.ai.AiVibeSuggestion
+import com.gendev.tiktokviewer.ai.AiVideoInsightState
+import com.gendev.tiktokviewer.ai.GeminiScrollAssistant
 import com.gendev.tiktokviewer.data.cache.EphemeralMetadataCache
 import com.gendev.tiktokviewer.data.privacy.PrivacyPolicyEnforcer
 import com.gendev.tiktokviewer.data.provider.ProxiTokProvider
@@ -13,19 +17,25 @@ import com.gendev.tiktokviewer.data.resilience.RetryBackoffPolicy
 import com.gendev.tiktokviewer.data.resilience.TikTokFallbackManagerImpl
 import com.gendev.tiktokviewer.domain.model.PlaybackMode
 import com.gendev.tiktokviewer.domain.model.ProviderResult
+import com.gendev.tiktokviewer.domain.model.PublicVideo
 import com.gendev.tiktokviewer.domain.model.SearchMode
 import com.gendev.tiktokviewer.domain.model.VideoSourceKind
 import com.gendev.tiktokviewer.ui.viewmodel.FeedUiState
+import com.gendev.tiktokviewer.ui.viewmodel.ViewerEngineMode
 import com.gendev.tiktokviewer.ui.viewmodel.ViewerViewModel
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
+import kotlinx.coroutines.withTimeout
 import okhttp3.Interceptor
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Protocol
@@ -241,5 +251,90 @@ class GendevViewModelAndOEmbedTest {
         assertEquals(PlaybackMode.EXO_DIRECT_STREAM, first.playbackMode)
         assertEquals("https://www.tikwm.com/video/media/play/7343728212422282538.mp4", first.directMediaUrl)
         assertEquals("https://www.tiktok.com/embed/v3/7343728212422282538", first.embedUrl)
+    }
+
+    @Test
+    fun `viewmodel automatically switches to guest scroll mode when upstream endpoints fail and runs gemini ai`() = runTest {
+        val failingClient = PrivacyPolicyEnforcer.createPrivacyOkHttpClient()
+            .newBuilder()
+            .addInterceptor(Interceptor { chain ->
+                Response.Builder()
+                    .request(chain.request())
+                    .protocol(Protocol.HTTP_1_1)
+                    .code(503)
+                    .message("Service Unavailable")
+                    .body("Upstream unavailable".toResponseBody("text/plain".toMediaType()))
+                    .build()
+            })
+            .build()
+
+        val moshi = Moshi.Builder().addLast(KotlinJsonAdapterFactory()).build()
+        val oEmbedService = Retrofit.Builder()
+            .baseUrl("https://www.tiktok.com/")
+            .client(failingClient)
+            .addConverterFactory(MoshiConverterFactory.create(moshi))
+            .build()
+            .create(TikTokOEmbedService::class.java)
+
+        val proxiProvider = ProxiTokProvider(
+            providerId = "down_node",
+            baseUrl = "https://down.example",
+            displayLabel = "Down Node",
+            sourceKind = VideoSourceKind.PROXITOK_PUBLIC,
+            okHttpClient = failingClient,
+            ioDispatcher = testDispatcher
+        )
+        val oEmbedProvider = TikTokOEmbedVideoProvider(oEmbedService, failingClient, testDispatcher)
+        val publicAdapter = TikTokPublicContentAdapter(oEmbedProvider, failingClient, testDispatcher)
+        val fallbackManager = TikTokFallbackManagerImpl(failingClient, RetryBackoffPolicy(maxAttempts = 1, delayFn = {}))
+
+        val repository = HybridTikTokRepository(
+            cache = EphemeralMetadataCache(),
+            okHttpClient = failingClient,
+            fallbackManager = fallbackManager,
+            proxiTokInstances = listOf(proxiProvider),
+            oEmbedVideoProvider = oEmbedProvider,
+            publicContentAdapter = publicAdapter,
+            playbackProvider = TikTokPlaybackProviderImpl(),
+            selfHostedFactory = { url ->
+                ProxiTokProvider("self", url, "Self", VideoSourceKind.PROXITOK_SELF_HOSTED, failingClient, testDispatcher)
+            }
+        )
+
+        val fakeAi = object : GeminiScrollAssistant {
+            override suspend fun buildVibeDiscovery(userMoodOrTopic: String): AiVibeSuggestion {
+                return AiVibeSuggestion(
+                    vibeLabel = "Kucing Santai",
+                    searchQuery = "kucing lucu",
+                    hashtags = listOf("kucinglucu", "cats", "fyp"),
+                    guestTopicTag = "kucinglucu"
+                )
+            }
+
+            override fun streamVideoInsight(video: PublicVideo): Flow<AiVideoInsightState> {
+                return flowOf(AiVideoInsightState.Ready("Video santai tentang alam."))
+            }
+        }
+
+        val vm = ViewerViewModel(repository, fakeAi)
+        withTimeout(5_000L) {
+            vm.viewerEngineMode.first { it == ViewerEngineMode.GUEST_SCROLL }
+        }
+
+        // Must never strand user on dead error screen when stream APIs fail
+        assertEquals(ViewerEngineMode.GUEST_SCROLL, vm.viewerEngineMode.value)
+        assertEquals("https://www.tiktok.com/explore", vm.guestUrl.value)
+
+        // Switching topic in Guest Scroll mode updates URL cleanly
+        vm.selectTopic("#FYP")
+        assertEquals("https://www.tiktok.com/foryou", vm.guestUrl.value)
+
+        // Gemini AI Vibe discovery populates Ready state and applies cleanly
+        vm.askAiVibe("kucing santai")
+        advanceUntilIdle()
+        val aiState = vm.aiVibeState.value
+        assertTrue(aiState is AiVibeState.Ready)
+        vm.applyAiVibeToGuestScroll((aiState as AiVibeState.Ready).suggestion)
+        assertEquals("https://www.tiktok.com/tag/kucinglucu", vm.guestUrl.value)
     }
 }

@@ -47,6 +47,8 @@ class HybridTikTokRepository(
     private val playbackProvider: TikTokPlaybackProvider,
     private val selfHostedFactory: (String) -> ProxiTokProvider
 ) {
+    val streamingOkHttpClient: OkHttpClient = PrivacyPolicyEnforcer.createStreamingOkHttpClient()
+
     private val _privacyConfig = MutableStateFlow(PrivacyConfig())
     val privacyConfig: StateFlow<PrivacyConfig> = _privacyConfig.asStateFlow()
 
@@ -346,6 +348,32 @@ class HybridTikTokRepository(
     }
 
     fun cacheEntryCount(): Int = cache.entryCount()
+
+    fun buildGuestScrollUrl(topicOrQuery: String): String {
+        val clean = topicOrQuery.trim()
+        val parsed = TikTokLinkParser.parse(clean)
+        if (parsed != null) {
+            return parsed.canonicalUrl
+        }
+        return when {
+            clean.isBlank() || clean.equals("Trending", ignoreCase = true) ->
+                "https://www.tiktok.com/explore"
+            clean.equals("#FYP", ignoreCase = true) || clean.equals("fyp", ignoreCase = true) ->
+                "https://www.tiktok.com/foryou"
+            clean.startsWith("@") -> {
+                val handle = clean.removePrefix("@").replace(Regex("[^A-Za-z0-9_.]"), "")
+                if (handle.isBlank()) "https://www.tiktok.com/explore" else "https://www.tiktok.com/@$handle"
+            }
+            clean.startsWith("#") -> {
+                val tag = clean.removePrefix("#").replace(Regex("[^A-Za-z0-9_]"), "")
+                if (tag.isBlank()) "https://www.tiktok.com/explore" else "https://www.tiktok.com/tag/$tag"
+            }
+            else -> {
+                val encoded = java.net.URLEncoder.encode(clean, "UTF-8")
+                "https://www.tiktok.com/search?q=$encoded"
+            }
+        }
+    }
 
     private fun buildSelfHostedOnly(): List<ProxiTokProvider> {
         val customUrl = _privacyConfig.value.customProxiTokBaseUrl

@@ -19,21 +19,33 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.gendev.tiktokviewer.ai.FirebaseGeminiScrollAssistant
+import com.gendev.tiktokviewer.ai.configureAppCheck
 import com.gendev.tiktokviewer.data.repository.HybridTikTokRepository
+import com.gendev.tiktokviewer.ui.screens.AiAssistantSheet
 import com.gendev.tiktokviewer.ui.screens.PublicSearchSheet
 import com.gendev.tiktokviewer.ui.screens.ResilienceShieldSheet
 import com.gendev.tiktokviewer.ui.screens.ViewerFeedScreen
 import com.gendev.tiktokviewer.ui.theme.GendevTheme
+import com.gendev.tiktokviewer.ui.viewmodel.FeedUiState
+import com.gendev.tiktokviewer.ui.viewmodel.ViewerEngineMode
 import com.gendev.tiktokviewer.ui.viewmodel.ViewerViewModel
 
 class MainActivity : ComponentActivity() {
 
     private val viewModel: ViewerViewModel by viewModels {
-        ViewerViewModel.Factory(HybridTikTokRepository.createDefault())
+        ViewerViewModel.Factory(
+            repository = HybridTikTokRepository.createDefault(),
+            aiAssistant = FirebaseGeminiScrollAssistant()
+        )
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // STEP 1: Configure Firebase App Check with launch intent before any UI or ViewModels.
+        configureAppCheck(this, intent)
+
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
             navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
@@ -64,6 +76,9 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun GendevViewerApp(viewModel: ViewerViewModel) {
     val context = LocalContext.current
+    val viewerEngineMode by viewModel.viewerEngineMode.collectAsStateWithLifecycle()
+    val guestUrl by viewModel.guestUrl.collectAsStateWithLifecycle()
+    val guestReloadToken by viewModel.guestReloadToken.collectAsStateWithLifecycle()
     val feedState by viewModel.feedState.collectAsStateWithLifecycle()
     val searchState by viewModel.searchState.collectAsStateWithLifecycle()
     val currentIndex by viewModel.currentVideoIndex.collectAsStateWithLifecycle()
@@ -72,10 +87,19 @@ fun GendevViewerApp(viewModel: ViewerViewModel) {
     val selectedTopic by viewModel.selectedTopic.collectAsStateWithLifecycle()
     val isSearchOpen by viewModel.isSearchOpen.collectAsStateWithLifecycle()
     val isResilienceOpen by viewModel.isResilienceOpen.collectAsStateWithLifecycle()
+    val isAiSheetOpen by viewModel.isAiSheetOpen.collectAsStateWithLifecycle()
+    val aiVibeState by viewModel.aiVibeState.collectAsStateWithLifecycle()
+    val aiInsightState by viewModel.aiInsightState.collectAsStateWithLifecycle()
     val endpointHealth by viewModel.endpointHealth.collectAsStateWithLifecycle()
     val privacyConfig by viewModel.privacyConfig.collectAsStateWithLifecycle()
     val cacheCount by viewModel.cacheCount.collectAsStateWithLifecycle()
     val bannerMessage by viewModel.bannerMessage.collectAsStateWithLifecycle()
+
+    val currentVideo = if (viewerEngineMode == ViewerEngineMode.NATIVE_STREAM) {
+        (feedState as? FeedUiState.Ready)?.videos?.getOrNull(currentIndex)
+    } else {
+        null
+    }
 
     Box(modifier = Modifier.fillMaxSize()) {
         ViewerFeedScreen(
@@ -85,7 +109,7 @@ fun GendevViewerApp(viewModel: ViewerViewModel) {
             isMuted = isMuted,
             selectedTopic = selectedTopic,
             endpointHealth = endpointHealth,
-            okHttpClient = viewModel.okHttpClient,
+            okHttpClient = viewModel.streamingOkHttpClient,
             onPageChanged = viewModel::onPageSelected,
             onTogglePlayPause = viewModel::togglePlayPause,
             onToggleMute = viewModel::toggleMute,
@@ -95,7 +119,13 @@ fun GendevViewerApp(viewModel: ViewerViewModel) {
             onHashtagClick = viewModel::openHashtagFromFeed,
             onRetry = { viewModel.loadFeed(forceRefresh = true) },
             onSwitchSource = viewModel::switchSourceAndRetry,
-            onFallbackToEmbed = viewModel::fallbackVideoToEmbed
+            onFallbackToEmbed = viewModel::fallbackVideoToEmbed,
+            viewerEngineMode = viewerEngineMode,
+            guestUrl = guestUrl,
+            guestReloadToken = guestReloadToken,
+            onSelectEngineMode = viewModel::switchEngineMode,
+            onReloadGuestScroll = viewModel::reloadGuestScroll,
+            onOpenAiAssistant = viewModel::openAiSheet
         )
 
         AnimatedVisibility(
@@ -107,7 +137,8 @@ fun GendevViewerApp(viewModel: ViewerViewModel) {
                 searchState = searchState,
                 onClose = viewModel::closeSearch,
                 onSearch = viewModel::performSearch,
-                onSelectVideo = viewModel::selectSearchVideo
+                onSelectVideo = viewModel::selectSearchVideo,
+                onOpenInGuestScroll = viewModel::openGuestScroll
             )
         }
 
@@ -130,6 +161,23 @@ fun GendevViewerApp(viewModel: ViewerViewModel) {
                 onResetBreakers = viewModel::resetCircuitBreakers,
                 onWipeCache = { viewModel.wipeEphemeralCache(context) },
                 onSaveSelfHostedUrl = viewModel::updateSelfHostedProxiTok
+            )
+        }
+
+        AnimatedVisibility(
+            visible = isAiSheetOpen,
+            enter = fadeIn() + slideInVertically { it / 10 },
+            exit = fadeOut() + slideOutVertically { it / 10 }
+        ) {
+            AiAssistantSheet(
+                aiVibeState = aiVibeState,
+                aiInsightState = aiInsightState,
+                currentVideo = currentVideo,
+                onClose = viewModel::closeAiSheet,
+                onAskVibe = viewModel::askAiVibe,
+                onApplyVibeToGuestScroll = viewModel::applyAiVibeToGuestScroll,
+                onApplyVibeToStream = viewModel::applyAiVibeToStream,
+                onSummarizeCurrentVideo = viewModel::summarizeCurrentVideo
             )
         }
     }

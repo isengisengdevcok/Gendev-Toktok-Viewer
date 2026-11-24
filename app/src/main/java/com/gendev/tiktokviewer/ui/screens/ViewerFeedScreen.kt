@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -32,9 +31,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.VolumeOff
 import androidx.compose.material.icons.automirrored.rounded.VolumeUp
+import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.KeyboardArrowUp
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material.icons.rounded.SwapHoriz
@@ -66,15 +67,16 @@ import com.example.R
 import com.gendev.tiktokviewer.domain.model.EndpointHealth
 import com.gendev.tiktokviewer.domain.model.PlaybackMode
 import com.gendev.tiktokviewer.domain.model.PublicVideo
+import com.gendev.tiktokviewer.ui.components.EngineModeSwitcher
 import com.gendev.tiktokviewer.ui.components.GendevInitialHeroLoader
 import com.gendev.tiktokviewer.ui.components.GendevLogoBadge
 import com.gendev.tiktokviewer.ui.components.GendevPulseLoader
 import com.gendev.tiktokviewer.ui.components.GlassIconButton
 import com.gendev.tiktokviewer.ui.components.ResilientErrorCard
-import com.gendev.tiktokviewer.ui.components.SourceIndicatorPill
 import com.gendev.tiktokviewer.ui.components.ambientObsidianAura
 import com.gendev.tiktokviewer.ui.player.ExoVideoPlayer
 import com.gendev.tiktokviewer.ui.player.IsolatedEmbedPlayer
+import com.gendev.tiktokviewer.ui.player.TikTokGuestScrollPlayer
 import com.gendev.tiktokviewer.ui.theme.AmoledBlack
 import com.gendev.tiktokviewer.ui.theme.DarkGlassBg
 import com.gendev.tiktokviewer.ui.theme.DarkGlassBorder
@@ -85,6 +87,7 @@ import com.gendev.tiktokviewer.ui.theme.MutedLavender
 import com.gendev.tiktokviewer.ui.theme.NeonViolet
 import com.gendev.tiktokviewer.ui.theme.PureWhite
 import com.gendev.tiktokviewer.ui.viewmodel.FeedUiState
+import com.gendev.tiktokviewer.ui.viewmodel.ViewerEngineMode
 import kotlinx.coroutines.flow.distinctUntilChanged
 import okhttp3.OkHttpClient
 
@@ -109,15 +112,14 @@ fun ViewerFeedScreen(
     onRetry: () -> Unit,
     onSwitchSource: () -> Unit,
     onFallbackToEmbed: (videoId: String, reason: String) -> Unit,
+    viewerEngineMode: ViewerEngineMode = ViewerEngineMode.NATIVE_STREAM,
+    guestUrl: String = "https://www.tiktok.com/explore",
+    guestReloadToken: Int = 0,
+    onSelectEngineMode: (ViewerEngineMode) -> Unit = {},
+    onReloadGuestScroll: () -> Unit = {},
+    onOpenAiAssistant: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    val activeSourceSummary = when (feedState) {
-        is FeedUiState.Ready -> feedState.videos.getOrNull(currentIndex)?.sourceLabel ?: feedState.activeSourceLabel
-        is FeedUiState.Loading -> "Resolving..."
-        is FeedUiState.Error -> "Source Alert"
-    }
-    val hasHealthyNode = endpointHealth.isEmpty() || endpointHealth.any { it.isHealthy }
-
     Scaffold(
         modifier = modifier
             .fillMaxSize()
@@ -130,89 +132,144 @@ fun ViewerFeedScreen(
                 .fillMaxSize()
                 .ambientObsidianAura()
         ) {
-            when (feedState) {
-                is FeedUiState.Loading -> {
-                    GendevInitialHeroLoader(
-                        sourceHint = feedState.sourceHint,
-                        onOpenSearch = onOpenSearch,
-                        modifier = Modifier
-                            .align(Alignment.Center)
-                            .testTag("feed_loading_indicator")
+            if (viewerEngineMode == ViewerEngineMode.GUEST_SCROLL) {
+                TikTokGuestScrollPlayer(
+                    targetUrl = guestUrl,
+                    isPaused = isPaused,
+                    isMuted = isMuted,
+                    reloadToken = guestReloadToken,
+                    modifier = Modifier.fillMaxSize()
+                )
+
+                // Minimalist floating playback dock on Guest Scroll mode
+                Column(
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .navigationBarsPadding()
+                        .padding(end = 16.dp, bottom = 24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    GlassIconButton(
+                        icon = Icons.Rounded.AutoAwesome,
+                        contentDescription = stringResource(R.string.ai_cd),
+                        onClick = onOpenAiAssistant,
+                        isHighlighted = true,
+                        sizeDp = 50,
+                        testTagName = "guest_ai_button"
+                    )
+                    GlassIconButton(
+                        icon = if (isPaused) Icons.Rounded.PlayArrow else Icons.Rounded.Pause,
+                        contentDescription = if (isPaused) "Play video" else "Pause video",
+                        onClick = onTogglePlayPause,
+                        isHighlighted = isPaused,
+                        sizeDp = 50,
+                        testTagName = "play_pause_button"
+                    )
+                    GlassIconButton(
+                        icon = if (isMuted) Icons.AutoMirrored.Rounded.VolumeOff else Icons.AutoMirrored.Rounded.VolumeUp,
+                        contentDescription = stringResource(R.string.mute_cd),
+                        onClick = onToggleMute,
+                        isHighlighted = isMuted,
+                        sizeDp = 48,
+                        testTagName = "mute_toggle_button"
+                    )
+                    GlassIconButton(
+                        icon = Icons.Rounded.Refresh,
+                        contentDescription = "Muat ulang scroll",
+                        onClick = onReloadGuestScroll,
+                        sizeDp = 48,
+                        testTagName = "reload_guest_scroll_button"
                     )
                 }
+            } else {
+                when (feedState) {
+                    is FeedUiState.Loading -> {
+                        GendevInitialHeroLoader(
+                            sourceHint = feedState.sourceHint,
+                            onOpenSearch = onOpenSearch,
+                            modifier = Modifier
+                                .align(Alignment.Center)
+                                .testTag("feed_loading_indicator")
+                        )
+                    }
 
-                is FeedUiState.Error -> {
-                    ResilientErrorCard(
-                        title = feedState.title,
-                        message = feedState.message,
-                        isCaptcha = feedState.isCaptcha,
-                        isRateLimited = feedState.isRateLimited,
-                        isForbidden = feedState.isForbidden,
-                        onRetry = onRetry,
-                        onSwitchSource = onSwitchSource,
-                        modifier = Modifier.align(Alignment.Center)
-                    )
-                }
-
-                is FeedUiState.Ready -> {
-                    if (feedState.videos.isEmpty()) {
+                    is FeedUiState.Error -> {
                         ResilientErrorCard(
-                            title = "No Public Videos",
-                            message = "The selected public source returned zero videos.",
-                            isCaptcha = false,
-                            isRateLimited = false,
-                            isForbidden = false,
+                            title = feedState.title,
+                            message = feedState.message,
+                            isCaptcha = feedState.isCaptcha,
+                            isRateLimited = feedState.isRateLimited,
+                            isForbidden = feedState.isForbidden,
                             onRetry = onRetry,
                             onSwitchSource = onSwitchSource,
+                            onOpenGuestScroll = { onSelectEngineMode(ViewerEngineMode.GUEST_SCROLL) },
                             modifier = Modifier.align(Alignment.Center)
                         )
-                    } else {
-                        val pagerState = rememberPagerState(
-                            initialPage = currentIndex.coerceIn(0, feedState.videos.lastIndex),
-                            pageCount = { feedState.videos.size }
-                        )
+                    }
 
-                        LaunchedEffect(pagerState) {
-                            snapshotFlow { pagerState.currentPage }
-                                .distinctUntilChanged()
-                                .collect { page -> onPageChanged(page) }
-                        }
-
-                        LaunchedEffect(currentIndex, feedState.videos) {
-                            val target = currentIndex.coerceIn(0, feedState.videos.lastIndex)
-                            if (pagerState.currentPage != target) {
-                                pagerState.scrollToPage(target)
-                            }
-                        }
-
-                        VerticalPager(
-                            state = pagerState,
-                            beyondViewportPageCount = 0,
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .testTag("vertical_video_pager")
-                        ) { pageIndex ->
-                            val video = feedState.videos[pageIndex]
-                            val isActive = pageIndex == pagerState.currentPage
-                            VideoFeedPage(
-                                video = video,
-                                isActivePage = isActive,
-                                isPaused = isPaused,
-                                isMuted = isMuted,
-                                isFirstPage = pageIndex == 0 && feedState.videos.size > 1,
-                                okHttpClient = okHttpClient,
-                                onTogglePlayPause = onTogglePlayPause,
-                                onToggleMute = onToggleMute,
+                    is FeedUiState.Ready -> {
+                        if (feedState.videos.isEmpty()) {
+                            ResilientErrorCard(
+                                title = "No Public Videos",
+                                message = "The selected public source returned zero videos.",
+                                isCaptcha = false,
+                                isRateLimited = false,
+                                isForbidden = false,
+                                onRetry = onRetry,
                                 onSwitchSource = onSwitchSource,
-                                onHashtagClick = onHashtagClick,
-                                onFallbackToEmbed = onFallbackToEmbed
+                                onOpenGuestScroll = { onSelectEngineMode(ViewerEngineMode.GUEST_SCROLL) },
+                                modifier = Modifier.align(Alignment.Center)
                             )
+                        } else {
+                            val pagerState = rememberPagerState(
+                                initialPage = currentIndex.coerceIn(0, feedState.videos.lastIndex),
+                                pageCount = { feedState.videos.size }
+                            )
+
+                            LaunchedEffect(pagerState) {
+                                snapshotFlow { pagerState.currentPage }
+                                    .distinctUntilChanged()
+                                    .collect { page -> onPageChanged(page) }
+                            }
+
+                            LaunchedEffect(currentIndex, feedState.videos) {
+                                val target = currentIndex.coerceIn(0, feedState.videos.lastIndex)
+                                if (pagerState.currentPage != target) {
+                                    pagerState.scrollToPage(target)
+                                }
+                            }
+
+                            VerticalPager(
+                                state = pagerState,
+                                beyondViewportPageCount = 0,
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .testTag("vertical_video_pager")
+                            ) { pageIndex ->
+                                val video = feedState.videos[pageIndex]
+                                val isActive = pageIndex == pagerState.currentPage
+                                VideoFeedPage(
+                                    video = video,
+                                    isActivePage = isActive,
+                                    isPaused = isPaused,
+                                    isMuted = isMuted,
+                                    isFirstPage = pageIndex == 0 && feedState.videos.size > 1,
+                                    okHttpClient = okHttpClient,
+                                    onTogglePlayPause = onTogglePlayPause,
+                                    onToggleMute = onToggleMute,
+                                    onSwitchSource = onSwitchSource,
+                                    onOpenAiAssistant = onOpenAiAssistant,
+                                    onHashtagClick = onHashtagClick,
+                                    onFallbackToEmbed = onFallbackToEmbed
+                                )
+                            }
                         }
                     }
                 }
             }
 
-            // Floating Top Glass Header + Quick Topic Selector
+            // Minimalist Floating Top Header + Mode Switch + Quick Topic Pills
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -229,7 +286,7 @@ fun ViewerFeedScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp),
+                        .padding(horizontal = 14.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
@@ -237,23 +294,32 @@ fun ViewerFeedScreen(
 
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        SourceIndicatorPill(
-                            label = activeSourceSummary,
-                            isHealthy = hasHealthyNode,
-                            onClick = onOpenResilience
+                        EngineModeSwitcher(
+                            isGuestScroll = viewerEngineMode == ViewerEngineMode.GUEST_SCROLL,
+                            onSelectGuestScroll = { onSelectEngineMode(ViewerEngineMode.GUEST_SCROLL) },
+                            onSelectNativeStream = { onSelectEngineMode(ViewerEngineMode.NATIVE_STREAM) }
+                        )
+                        GlassIconButton(
+                            icon = Icons.Rounded.AutoAwesome,
+                            contentDescription = stringResource(R.string.ai_cd),
+                            onClick = onOpenAiAssistant,
+                            sizeDp = 48,
+                            testTagName = "open_ai_button"
                         )
                         GlassIconButton(
                             icon = Icons.Rounded.Search,
                             contentDescription = stringResource(R.string.search_cd),
                             onClick = onOpenSearch,
+                            sizeDp = 48,
                             testTagName = "open_search_button"
                         )
                         GlassIconButton(
                             icon = Icons.Rounded.Shield,
                             contentDescription = stringResource(R.string.resilience_cd),
                             onClick = onOpenResilience,
+                            sizeDp = 48,
                             testTagName = "open_resilience_button"
                         )
                     }
@@ -302,6 +368,7 @@ private fun VideoFeedPage(
     onTogglePlayPause: () -> Unit,
     onToggleMute: () -> Unit,
     onSwitchSource: () -> Unit,
+    onOpenAiAssistant: () -> Unit,
     onHashtagClick: (String) -> Unit,
     onFallbackToEmbed: (videoId: String, reason: String) -> Unit
 ) {
@@ -381,7 +448,7 @@ private fun VideoFeedPage(
             )
         }
 
-        // Bottom Glass Metadata + Dedicated Play/Pause/Mute Control Dock (ZERO social buttons)
+        // Bottom Glass Metadata + Minimalist Player Control Capsule (ZERO social buttons)
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -478,11 +545,18 @@ private fun VideoFeedPage(
                     }
                 }
 
-                // Right-side Minimalist Player Control Capsule (Play/Pause, Mute, Switch Source)
+                // Right-side Minimalist Player Control Capsule (AI, Play/Pause, Mute, Switch Source)
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
+                    GlassIconButton(
+                        icon = Icons.Rounded.AutoAwesome,
+                        contentDescription = stringResource(R.string.ai_cd),
+                        onClick = onOpenAiAssistant,
+                        sizeDp = 48,
+                        testTagName = "video_ai_insight_button"
+                    )
                     GlassIconButton(
                         icon = if (isPaused) Icons.Rounded.PlayArrow else Icons.Rounded.Pause,
                         contentDescription = if (isPaused) "Play video" else "Pause video",
