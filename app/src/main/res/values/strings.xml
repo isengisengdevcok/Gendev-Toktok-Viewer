@@ -8,6 +8,7 @@
     <string name="clear_cache_action">Wipe Temp Cache</string>
     <string name="cache_cleared_msg">Ephemeral cache wiped</string>
     <string name="mute_cd">Mute or unmute video</string>
+    <string name="refresh_cd">Refresh feed</string>
     <string name="search_cd">Open public search</string>
     <string name="resilience_cd">Source health and privacy shield</string>
     <string name="settings_cd">Open settings and theme</string>

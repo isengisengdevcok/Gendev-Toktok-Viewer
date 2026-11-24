@@ -72,6 +72,7 @@ class GendevComposeUiTest {
         var lastPage = 0
         var pausedState by mutableStateOf(false)
         var settingsOpened = false
+        var refreshed = false
 
         composeTestRule.setContent {
             GendevTheme {
@@ -86,6 +87,7 @@ class GendevComposeUiTest {
                     onTogglePlayPause = { pausedState = !pausedState },
                     onToggleMute = {},
                     onOpenSettings = { settingsOpened = true },
+                    onRefreshFeed = { refreshed = true },
                     onReturnToUnifiedScroll = {},
                     onRetry = {},
                     onSwitchSource = {},
@@ -105,8 +107,14 @@ class GendevComposeUiTest {
 
         composeTestRule.onNodeWithTag("video_page_1001").assertIsDisplayed()
         composeTestRule.onNodeWithTag("open_settings_button").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("refresh_feed_button").assertIsDisplayed()
         composeTestRule.onNodeWithTag("play_pause_button").assertIsDisplayed()
         composeTestRule.onNodeWithTag("mute_toggle_button").assertIsDisplayed()
+
+        // Tap refresh button
+        composeTestRule.onNodeWithTag("refresh_feed_button").performClick()
+        composeTestRule.waitForIdle()
+        assertTrue(refreshed)
 
         // Toggle Play/Pause button
         composeTestRule.onNodeWithTag("play_pause_button").performClick()

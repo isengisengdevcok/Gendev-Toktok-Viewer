@@ -208,12 +208,52 @@ class ViewerViewModel(
     }
 
     fun reloadUnifiedFeed() {
+        refreshFeed()
+    }
+
+    fun refreshFeed() {
         _isSettingsOpen.value = false
         _isPaused.value = false
         if (_viewerEngineMode.value == ViewerEngineMode.GUEST_SCROLL) {
-            _guestReloadToken.value += 1
-        } else {
-            loadFeed(forceRefresh = true)
+            val toggledGuestUrl = if (_guestUrl.value.contains("/foryou", ignoreCase = true)) {
+                "https://www.tiktok.com/explore"
+            } else {
+                "https://www.tiktok.com/foryou"
+            }
+            viewModelScope.launch {
+                val upgrade = withTimeoutOrNull(2_500L) {
+                    repository.loadPublicFeed(forceRefresh = true)
+                }
+                if (upgrade is ProviderResult.Success && upgrade.data.videos.isNotEmpty()) {
+                    applyFeedResult(upgrade, autoFallbackToGuestOnFailure = false)
+                } else {
+                    _guestUrl.value = toggledGuestUrl
+                    _guestReloadToken.value += 1
+                    _viewerEngineMode.value = ViewerEngineMode.GUEST_SCROLL
+                }
+            }
+            return
+        }
+
+        val cursor = nextFeedCursor ?: "1"
+        viewModelScope.launch {
+            _feedState.value = FeedUiState.Loading("Memuat video baru...")
+            val res = withTimeoutOrNull(4_500L) {
+                repository.loadMorePublicFeed(cursor)
+            }
+            if (res is ProviderResult.Success && res.data.videos.isNotEmpty()) {
+                applyFeedResult(res, autoFallbackToGuestOnFailure = true)
+            } else {
+                nextFeedCursor = ((cursor.toIntOrNull() ?: 1) + 1).toString()
+                val fallbackRes = withTimeoutOrNull(4_200L) {
+                    repository.loadPublicFeed(forceRefresh = true)
+                }
+                if (fallbackRes == null) {
+                    activateSeamlessGuestFallback("Beralih cepat ke Mode Scroll Tanpa Login")
+                } else {
+                    applyFeedResult(fallbackRes, autoFallbackToGuestOnFailure = true)
+                }
+            }
         }
     }
 
@@ -332,7 +372,7 @@ class ViewerViewModel(
             val ready = _feedState.value as? FeedUiState.Ready
             if (_viewerEngineMode.value == ViewerEngineMode.NATIVE_STREAM &&
                 ready != null &&
-                index >= (ready.videos.size - 4).coerceAtLeast(1) &&
+                index >= (ready.videos.size - 4).coerceAtLeast(0) &&
                 !isLoadingMoreFeed
             ) {
                 loadMoreFeed()

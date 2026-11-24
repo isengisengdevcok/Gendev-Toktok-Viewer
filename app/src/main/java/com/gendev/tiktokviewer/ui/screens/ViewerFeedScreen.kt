@@ -24,6 +24,7 @@ import androidx.compose.material.icons.automirrored.rounded.VolumeUp
 import androidx.compose.material.icons.rounded.DynamicFeed
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.LinearProgressIndicator
@@ -70,6 +71,7 @@ fun ViewerFeedScreen(
     onTogglePlayPause: () -> Unit,
     onToggleMute: () -> Unit,
     onOpenSettings: () -> Unit,
+    onRefreshFeed: () -> Unit,
     onReturnToUnifiedScroll: () -> Unit,
     onRetry: () -> Unit,
     onSwitchSource: () -> Unit,
@@ -115,6 +117,7 @@ fun ViewerFeedScreen(
                     onTogglePlayPause = onTogglePlayPause,
                     onToggleMute = onToggleMute,
                     onBackToFeed = onReturnToUnifiedScroll,
+                    onRefreshFeed = onRefreshFeed,
                     onOpenSettings = onOpenSettings,
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
@@ -179,7 +182,7 @@ fun ViewerFeedScreen(
 
                             VerticalPager(
                                 state = pagerState,
-                                beyondViewportPageCount = 1,
+                                beyondViewportPageCount = 0,
                                 modifier = Modifier
                                     .fillMaxSize()
                                     .testTag("vertical_video_pager")
@@ -209,6 +212,7 @@ fun ViewerFeedScreen(
                     onTogglePlayPause = onTogglePlayPause,
                     onToggleMute = onToggleMute,
                     onBackToFeed = onReturnToUnifiedScroll,
+                    onRefreshFeed = onRefreshFeed,
                     onOpenSettings = onOpenSettings,
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
@@ -229,6 +233,7 @@ private fun MinimalCornerControls(
     onTogglePlayPause: () -> Unit,
     onToggleMute: () -> Unit,
     onBackToFeed: () -> Unit,
+    onRefreshFeed: () -> Unit,
     onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -267,6 +272,14 @@ private fun MinimalCornerControls(
                 testTagName = "mute_toggle_button"
             )
         }
+        GlassIconButton(
+            icon = Icons.Rounded.Refresh,
+            contentDescription = stringResource(R.string.refresh_cd),
+            onClick = onRefreshFeed,
+            sizeDp = if (ultraCleanMode) 36 else 40,
+            alpha = if (ultraCleanMode) 0.20f else 0.24f,
+            testTagName = "refresh_feed_button"
+        )
         GlassIconButton(
             icon = Icons.Rounded.Tune,
             contentDescription = stringResource(R.string.settings_cd),

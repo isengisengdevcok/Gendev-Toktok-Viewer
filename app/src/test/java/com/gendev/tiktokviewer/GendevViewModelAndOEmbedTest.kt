@@ -450,5 +450,64 @@ class GendevViewModelAndOEmbedTest {
         val expanded = vm.feedState.value as FeedUiState.Ready
         assertEquals(7, expanded.videos.size)
         assertTrue(expanded.videos.any { it.id == "201" })
+
+        // Tapping refresh loads fresh cursor videos and resets index to 0
+        vm.refreshFeed()
+        advanceUntilIdle()
+        val refreshed = vm.feedState.value as FeedUiState.Ready
+        assertEquals(0, vm.currentVideoIndex.value)
+        assertTrue(refreshed.videos.any { it.id == "201" })
+    }
+
+    @Test
+    fun `refreshFeed toggles guest scroll between foryou and explore when stream unavailable`() = runTest {
+        val failingClient = PrivacyPolicyEnforcer.createPrivacyOkHttpClient()
+            .newBuilder()
+            .addInterceptor(Interceptor { chain ->
+                Response.Builder()
+                    .request(chain.request())
+                    .protocol(Protocol.HTTP_1_1)
+                    .code(503)
+                    .message("Service Unavailable")
+                    .body("Down".toResponseBody("text/plain".toMediaType()))
+                    .build()
+            })
+            .build()
+
+        val oEmbedService = object : TikTokOEmbedService {
+            override suspend fun getOEmbed(videoUrl: String): retrofit2.Response<com.gendev.tiktokviewer.data.remote.dto.TikTokOEmbedDto> {
+                return retrofit2.Response.error(503, "Down".toResponseBody("text/plain".toMediaType()))
+            }
+        }
+        val oEmbedProvider = TikTokOEmbedVideoProvider(oEmbedService, failingClient, testDispatcher)
+        val publicAdapter = TikTokPublicContentAdapter(oEmbedProvider, failingClient, testDispatcher)
+        val fallbackManager = TikTokFallbackManagerImpl(failingClient, RetryBackoffPolicy(maxAttempts = 1, delayFn = {}))
+        val repository = HybridTikTokRepository(
+            cache = EphemeralMetadataCache(),
+            okHttpClient = failingClient,
+            fallbackManager = fallbackManager,
+            proxiTokInstances = emptyList(),
+            oEmbedVideoProvider = oEmbedProvider,
+            publicContentAdapter = publicAdapter,
+            playbackProvider = TikTokPlaybackProviderImpl(),
+            selfHostedFactory = { url ->
+                ProxiTokProvider("self", url, "Self", VideoSourceKind.PROXITOK_SELF_HOSTED, failingClient, testDispatcher)
+            }
+        )
+
+        val vm = ViewerViewModel(repository, startInUnifiedScroll = true)
+        assertEquals("https://www.tiktok.com/foryou", vm.guestUrl.value)
+        val initialToken = vm.guestReloadToken.value
+
+        vm.refreshFeed()
+        advanceUntilIdle()
+        assertEquals(ViewerEngineMode.GUEST_SCROLL, vm.viewerEngineMode.value)
+        assertEquals("https://www.tiktok.com/explore", vm.guestUrl.value)
+        assertEquals(initialToken + 1, vm.guestReloadToken.value)
+
+        vm.refreshFeed()
+        advanceUntilIdle()
+        assertEquals("https://www.tiktok.com/foryou", vm.guestUrl.value)
+        assertEquals(initialToken + 2, vm.guestReloadToken.value)
     }
 }

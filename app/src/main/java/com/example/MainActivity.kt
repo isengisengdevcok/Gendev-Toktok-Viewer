@@ -121,6 +121,7 @@ fun GendevViewerApp(viewModel: ViewerViewModel) {
             onTogglePlayPause = viewModel::togglePlayPause,
             onToggleMute = viewModel::toggleMute,
             onOpenSettings = viewModel::openSettings,
+            onRefreshFeed = viewModel::refreshFeed,
             onReturnToUnifiedScroll = { viewModel.openGuestScroll("#FYP") },
             onRetry = { viewModel.loadFeed(forceRefresh = true) },
             onSwitchSource = viewModel::switchSourceAndRetry,

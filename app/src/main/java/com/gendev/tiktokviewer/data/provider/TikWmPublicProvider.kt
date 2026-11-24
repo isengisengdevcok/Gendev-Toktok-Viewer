@@ -220,8 +220,8 @@ class TikWmPublicProvider(
         val displayName = author?.nickname?.takeIf { it.isNotBlank() } ?: "@$handle"
         val caption = title?.trim().orEmpty().ifBlank { "Public video by @$handle" }
 
-        val rawPlayUrl = hdPlay?.takeIf { it.isNotBlank() }
-            ?: play?.takeIf { it.isNotBlank() }
+        val rawPlayUrl = play?.takeIf { it.isNotBlank() }
+            ?: hdPlay?.takeIf { it.isNotBlank() }
             ?: wmPlay?.takeIf { it.isNotBlank() }
         val resolvedMedia = resolveHttpsUrl(rawPlayUrl)
         val resolvedCover = resolveHttpsUrl(originCover ?: cover)
