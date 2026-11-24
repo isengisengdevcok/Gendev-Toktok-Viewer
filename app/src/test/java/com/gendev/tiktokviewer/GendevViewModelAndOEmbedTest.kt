@@ -62,9 +62,9 @@ class GendevViewModelAndOEmbedTest {
         assertNotNull(canonical)
         assertEquals("7343728212422282538", canonical?.videoId)
         assertEquals("nasa", canonical?.authorHandle)
-        assertEquals("https://www.tiktok.com/embed/v2/7343728212422282538", canonical?.embedUrl)
+        assertEquals("https://www.tiktok.com/embed/v3/7343728212422282538", canonical?.embedUrl)
 
-        val embed = TikTokLinkParser.parse("https://www.tiktok.com/embed/v2/7106594312292453675")
+        val embed = TikTokLinkParser.parse("https://www.tiktok.com/embed/v3/7106594312292453675")
         assertNotNull(embed)
         assertEquals("7106594312292453675", embed?.videoId)
     }
@@ -188,5 +188,58 @@ class GendevViewModelAndOEmbedTest {
         advanceUntilIdle()
         vm.wipeEphemeralCache(null)
         assertEquals(0, vm.cacheCount.value)
+    }
+
+    @Test
+    fun `tikwm provider resolves trending feed and direct mp4 streams`() = runTest {
+        val tikWmJson = """
+            {
+              "code": 0,
+              "msg": "success",
+              "data": [
+                {
+                  "video_id": "7343728212422282538",
+                  "title": "Public ocean view #nature #fyp",
+                  "play": "/video/media/play/7343728212422282538.mp4",
+                  "cover": "https://www.tikwm.com/video/cover/7343728212422282538.jpg",
+                  "duration": 18,
+                  "author": {
+                    "id": "101",
+                    "unique_id": "oceanview",
+                    "nickname": "Ocean View"
+                  }
+                }
+              ]
+            }
+        """.trimIndent()
+
+        val client = PrivacyPolicyEnforcer.createPrivacyOkHttpClient()
+            .newBuilder()
+            .addInterceptor(Interceptor { chain ->
+                Response.Builder()
+                    .request(chain.request())
+                    .protocol(Protocol.HTTP_1_1)
+                    .code(200)
+                    .message("OK")
+                    .body(tikWmJson.toResponseBody("application/json".toMediaType()))
+                    .build()
+            })
+            .build()
+
+        val moshi = Moshi.Builder().addLast(KotlinJsonAdapterFactory()).build()
+        val provider = com.gendev.tiktokviewer.data.provider.TikWmPublicProvider(
+            okHttpClient = client,
+            moshi = moshi,
+            ioDispatcher = testDispatcher
+        )
+
+        val feedResult = provider.fetchTrendingFeed()
+        assertTrue(feedResult is ProviderResult.Success)
+        val first = (feedResult as ProviderResult.Success).data.videos.first()
+        assertEquals("7343728212422282538", first.id)
+        assertEquals("oceanview", first.authorHandle)
+        assertEquals(PlaybackMode.EXO_DIRECT_STREAM, first.playbackMode)
+        assertEquals("https://www.tikwm.com/video/media/play/7343728212422282538.mp4", first.directMediaUrl)
+        assertEquals("https://www.tiktok.com/embed/v3/7343728212422282538", first.embedUrl)
     }
 }

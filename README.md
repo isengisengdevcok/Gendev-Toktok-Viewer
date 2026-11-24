@@ -28,10 +28,10 @@ All providers sit behind clean, swappable interfaces (`com.gendev.tiktokviewer.d
 
 ### Supported Sources
 1. **Self-Hosted ProxiTok Instance** (configurable HTTPS URL inside Privacy & Resilience Shield)
-2. **Open-Source ProxiTok Public Instances** (`proxitok.pabloferreiro.es`, `proxitok.pussthecat.org`, `tok.adminforge.de`, `proxitok.privacydev.net`)
-3. **TikTok Public Content Adapter** (public `#hashtag`, `@creator`, and link resolution)
+2. **TikTok Public Content Adapter (TikWM JSON)** (`https://www.tikwm.com/api/`) for public trending feeds, `#hashtag`, `@creator`, and direct HTTPS Media3 streams
+3. **Open-Source ProxiTok Public Instances** (dynamically synced from `pablouser1/ProxiTok/master/instances.json` using `/trending/rss`, `/tag/{tag}/rss`, `/@{user}/rss`)
 4. **TikTok Official oEmbed API** (`https://www.tiktok.com/oembed`)
-5. **TikTok Official Embed v2 Player** (`https://www.tiktok.com/embed/v2/{videoId}`) rendered inside a cookie-disabled, storage-disabled `IsolatedEmbedPlayer` WebView.
+5. **TikTok Official Embed v3 Player** (`https://www.tiktok.com/embed/v3/{videoId}`) rendered inside a cookie-disabled, storage-disabled `IsolatedEmbedPlayer` WebView.
 
 ---
 

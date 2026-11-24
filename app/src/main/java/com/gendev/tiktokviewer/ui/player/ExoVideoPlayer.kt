@@ -3,11 +3,19 @@ package com.gendev.tiktokviewer.ui.player
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import androidx.annotation.OptIn
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material3.Icon
@@ -20,8 +28,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -37,7 +46,10 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import com.gendev.tiktokviewer.ui.theme.AmoledBlack
-import com.gendev.tiktokviewer.ui.theme.PureWhite
+import com.gendev.tiktokviewer.ui.theme.DarkGlassBorder
+import com.gendev.tiktokviewer.ui.theme.DarkGlassStrong
+import com.gendev.tiktokviewer.ui.theme.NeonViolet
+import kotlinx.coroutines.delay
 import okhttp3.OkHttpClient
 
 @OptIn(UnstableApi::class)
@@ -46,14 +58,16 @@ fun ExoVideoPlayer(
     streamUrl: String,
     okHttpClient: OkHttpClient,
     isActivePage: Boolean,
+    isPaused: Boolean,
     isMuted: Boolean,
+    onTogglePlayPause: () -> Unit,
+    onProgressChanged: (Float) -> Unit,
     onBufferingChanged: (Boolean) -> Unit,
     onStreamError: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
-    var userPaused by remember(streamUrl) { mutableStateOf(false) }
     var lifecycleResumed by remember { mutableStateOf(true) }
 
     val exoPlayer = remember(streamUrl) {
@@ -82,12 +96,22 @@ fun ExoVideoPlayer(
             }
     }
 
-    LaunchedEffect(isActivePage, userPaused, lifecycleResumed) {
-        exoPlayer.playWhenReady = isActivePage && !userPaused && lifecycleResumed
+    LaunchedEffect(isActivePage, isPaused, lifecycleResumed) {
+        exoPlayer.playWhenReady = isActivePage && !isPaused && lifecycleResumed
     }
 
     LaunchedEffect(isMuted) {
         exoPlayer.volume = if (isMuted) 0f else 1f
+    }
+
+    LaunchedEffect(isActivePage, isPaused, exoPlayer) {
+        while (isActivePage && !isPaused) {
+            val dur = exoPlayer.duration
+            if (dur > 0L) {
+                onProgressChanged((exoPlayer.currentPosition.toFloat() / dur.toFloat()).coerceIn(0f, 1f))
+            }
+            delay(250L)
+        }
     }
 
     DisposableEffect(lifecycleOwner, exoPlayer) {
@@ -132,10 +156,9 @@ fun ExoVideoPlayer(
             .background(AmoledBlack)
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
-                indication = null
-            ) {
-                userPaused = !userPaused
-            },
+                indication = null,
+                onClick = onTogglePlayPause
+            ),
         contentAlignment = Alignment.Center
     ) {
         AndroidView(
@@ -158,13 +181,26 @@ fun ExoVideoPlayer(
             modifier = Modifier.fillMaxSize()
         )
 
-        if (userPaused) {
-            Icon(
-                imageVector = Icons.Rounded.PlayArrow,
-                contentDescription = "Resume playback",
-                tint = PureWhite.copy(alpha = 0.85f),
-                modifier = Modifier.background(Color.Black.copy(alpha = 0.35f))
-            )
+        AnimatedVisibility(
+            visible = isPaused,
+            enter = fadeIn() + scaleIn(initialScale = 0.85f),
+            exit = fadeOut() + scaleOut(targetScale = 0.85f)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(72.dp)
+                    .clip(CircleShape)
+                    .background(DarkGlassStrong)
+                    .border(1.5.dp, DarkGlassBorder, CircleShape),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.PlayArrow,
+                    contentDescription = "Paused - tap to play",
+                    tint = NeonViolet,
+                    modifier = Modifier.size(38.dp)
+                )
+            }
         }
     }
 }

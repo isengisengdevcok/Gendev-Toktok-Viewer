@@ -7,8 +7,10 @@ import com.gendev.tiktokviewer.data.provider.ProxiTokProvider
 import com.gendev.tiktokviewer.data.provider.TikTokOEmbedVideoProvider
 import com.gendev.tiktokviewer.data.provider.TikTokPlaybackProviderImpl
 import com.gendev.tiktokviewer.data.provider.TikTokPublicContentAdapter
+import com.gendev.tiktokviewer.data.provider.TikWmPublicProvider
 import com.gendev.tiktokviewer.data.remote.TikTokLinkParser
 import com.gendev.tiktokviewer.data.remote.TikTokOEmbedService
+import com.gendev.tiktokviewer.data.resilience.RetryBackoffPolicy
 import com.gendev.tiktokviewer.data.resilience.TikTokFallbackManagerImpl
 import com.gendev.tiktokviewer.domain.model.EndpointHealth
 import com.gendev.tiktokviewer.domain.model.FeedPage
@@ -23,10 +25,14 @@ import com.gendev.tiktokviewer.domain.provider.TikTokFallbackManager
 import com.gendev.tiktokviewer.domain.provider.TikTokPlaybackProvider
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
+import okhttp3.Request
+import org.json.JSONArray
 import retrofit2.Retrofit
 import retrofit2.converter.moshi.MoshiConverterFactory
 
@@ -34,6 +40,7 @@ class HybridTikTokRepository(
     private val cache: EphemeralMetadataCache,
     val okHttpClient: OkHttpClient,
     val fallbackManager: TikTokFallbackManager,
+    private val tikWmProvider: TikWmPublicProvider? = null,
     private val proxiTokInstances: List<ProxiTokProvider>,
     private val oEmbedVideoProvider: TikTokOEmbedVideoProvider,
     private val publicContentAdapter: TikTokPublicContentAdapter,
@@ -43,9 +50,13 @@ class HybridTikTokRepository(
     private val _privacyConfig = MutableStateFlow(PrivacyConfig())
     val privacyConfig: StateFlow<PrivacyConfig> = _privacyConfig.asStateFlow()
 
+    private val dynamicProxiTokInstances = MutableStateFlow(proxiTokInstances)
     val endpointHealthFlow: StateFlow<List<EndpointHealth>> = fallbackManager.endpointHealthFlow
 
     init {
+        tikWmProvider?.let {
+            fallbackManager.registerOrUpdateEndpoint(it.providerId, "Public Stream · TikWM", it.sourceKind)
+        }
         proxiTokInstances.forEach {
             fallbackManager.registerOrUpdateEndpoint(it.providerId, it.displayLabel, it.sourceKind)
         }
@@ -56,7 +67,7 @@ class HybridTikTokRepository(
         )
         fallbackManager.registerOrUpdateEndpoint(
             publicContentAdapter.providerId,
-            "TikTok Public Adapter",
+            "TikTok Official Embed v3",
             publicContentAdapter.sourceKind
         )
     }
@@ -79,6 +90,46 @@ class HybridTikTokRepository(
         return true
     }
 
+    /**
+     * Fetches active community ProxiTok instances directly from pablouser1/ProxiTok GitHub directory.
+     */
+    suspend fun refreshCommunityProxiTokDirectory(): Int = withContext(Dispatchers.IO) {
+        runCatching {
+            val request = Request.Builder()
+                .url("https://raw.githubusercontent.com/pablouser1/ProxiTok/master/instances.json")
+                .get()
+                .build()
+            okHttpClient.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return@withContext 0
+                val raw = response.body?.string().orEmpty()
+                val arr = JSONArray(raw)
+                val discovered = mutableListOf<ProxiTokProvider>()
+                for (i in 0 until arr.length()) {
+                    val obj = arr.optJSONObject(i) ?: continue
+                    val url = obj.optString("url").trim().trimEnd('/')
+                    val cloudflare = obj.optBoolean("cloudflare", false)
+                    if (!cloudflare && PrivacyPolicyEnforcer.isSafeHttpsUrl(url)) {
+                        val host = url.removePrefix("https://").substringBefore("/")
+                        val provider = ProxiTokProvider(
+                            providerId = "proxitok_dir_$i",
+                            baseUrl = url,
+                            displayLabel = "ProxiTok · $host",
+                            sourceKind = VideoSourceKind.PROXITOK_PUBLIC,
+                            okHttpClient = okHttpClient
+                        )
+                        discovered += provider
+                        fallbackManager.registerOrUpdateEndpoint(provider.providerId, provider.displayLabel, provider.sourceKind)
+                    }
+                    if (discovered.size >= 4) break
+                }
+                if (discovered.isNotEmpty()) {
+                    dynamicProxiTokInstances.value = discovered
+                }
+                discovered.size
+            }
+        }.getOrDefault(0)
+    }
+
     suspend fun loadPublicFeed(forceRefresh: Boolean = false): ProviderResult<FeedPage> {
         val cacheKey = "trending_public"
         if (!forceRefresh) {
@@ -86,7 +137,7 @@ class HybridTikTokRepository(
                 return ProviderResult.Success(
                     data = cached,
                     sourceKind = cached.sourceKind,
-                    endpoint = "${cached.sourceEndpoint} (ephemeral cache)",
+                    endpoint = "${cached.sourceEndpoint} (cache)",
                     fromCache = true
                 )
             }
@@ -98,6 +149,31 @@ class HybridTikTokRepository(
             cache.putFeed(cacheKey, result.data)
         }
         return result
+    }
+
+    suspend fun loadTopicFeed(topic: String): ProviderResult<FeedPage> {
+        val clean = topic.trim()
+        if (clean.equals("Trending", ignoreCase = true) || clean.isBlank()) {
+            return loadPublicFeed(forceRefresh = true)
+        }
+        val mode = if (clean.startsWith("@")) SearchMode.CREATOR else SearchMode.HASHTAG
+        return when (val searchRes = searchPublic(clean, mode)) {
+            is ProviderResult.Success -> ProviderResult.Success(
+                data = FeedPage(
+                    videos = searchRes.data,
+                    sourceKind = searchRes.sourceKind,
+                    sourceEndpoint = searchRes.endpoint,
+                    noticeMessage = "Topic: $clean"
+                ),
+                sourceKind = searchRes.sourceKind,
+                endpoint = searchRes.endpoint,
+                fromCache = searchRes.fromCache
+            )
+            is ProviderResult.RateLimited -> searchRes
+            is ProviderResult.AccessRestricted -> searchRes
+            is ProviderResult.NetworkError -> searchRes
+            is ProviderResult.ContentUnavailable -> searchRes
+        }
     }
 
     suspend fun searchPublic(rawQuery: String, mode: SearchMode): ProviderResult<List<PublicVideo>> {
@@ -132,7 +208,17 @@ class HybridTikTokRepository(
                 }
             }
             SearchMode.HASHTAG -> {
-                val attempts = buildActiveProxiTokList().map { provider ->
+                val attempts = buildSelfHostedOnly().map { provider ->
+                    ProviderEndpointCall(provider.providerId, provider.displayLabel, provider.sourceKind) {
+                        provider.searchHashtag(query)
+                    }
+                } + listOfNotNull(
+                    tikWmProvider?.let {
+                        ProviderEndpointCall(it.providerId, "Public Stream · TikWM", it.sourceKind) {
+                            it.searchHashtag(query)
+                        }
+                    }
+                ) + dynamicProxiTokInstances.value.map { provider ->
                     ProviderEndpointCall(provider.providerId, provider.displayLabel, provider.sourceKind) {
                         provider.searchHashtag(query)
                     }
@@ -146,7 +232,17 @@ class HybridTikTokRepository(
                 fallbackManager.executeWithFallback("search_hashtag", attempts)
             }
             SearchMode.CREATOR -> {
-                val attempts = buildActiveProxiTokList().map { provider ->
+                val attempts = buildSelfHostedOnly().map { provider ->
+                    ProviderEndpointCall(provider.providerId, provider.displayLabel, provider.sourceKind) {
+                        provider.searchCreator(query)
+                    }
+                } + listOfNotNull(
+                    tikWmProvider?.let {
+                        ProviderEndpointCall(it.providerId, "Public Stream · TikWM", it.sourceKind) {
+                            it.searchCreator(query)
+                        }
+                    }
+                ) + dynamicProxiTokInstances.value.map { provider ->
                     ProviderEndpointCall(provider.providerId, provider.displayLabel, provider.sourceKind) {
                         provider.searchCreator(query)
                     }
@@ -160,7 +256,17 @@ class HybridTikTokRepository(
                 fallbackManager.executeWithFallback("search_creator", attempts)
             }
             SearchMode.KEYWORD, SearchMode.AUTO -> {
-                val attempts = buildActiveProxiTokList().map { provider ->
+                val attempts = buildSelfHostedOnly().map { provider ->
+                    ProviderEndpointCall(provider.providerId, provider.displayLabel, provider.sourceKind) {
+                        provider.searchVideos(query)
+                    }
+                } + listOfNotNull(
+                    tikWmProvider?.let {
+                        ProviderEndpointCall(it.providerId, "Public Stream · TikWM", it.sourceKind) {
+                            it.searchVideos(query)
+                        }
+                    }
+                ) + dynamicProxiTokInstances.value.map { provider ->
                     ProviderEndpointCall(provider.providerId, provider.displayLabel, provider.sourceKind) {
                         provider.searchVideos(query)
                     }
@@ -189,7 +295,17 @@ class HybridTikTokRepository(
             }
         }
 
-        val attempts = buildActiveProxiTokList().map { provider ->
+        val attempts = buildSelfHostedOnly().map { provider ->
+            ProviderEndpointCall(provider.providerId, provider.displayLabel, provider.sourceKind) {
+                provider.resolveVideoByUrlOrId(urlOrId)
+            }
+        } + listOfNotNull(
+            tikWmProvider?.let {
+                ProviderEndpointCall(it.providerId, "Public Stream · TikWM", it.sourceKind) {
+                    it.resolveVideoByUrlOrId(urlOrId)
+                }
+            }
+        ) + dynamicProxiTokInstances.value.map { provider ->
             ProviderEndpointCall(provider.providerId, provider.displayLabel, provider.sourceKind) {
                 provider.resolveVideoByUrlOrId(urlOrId)
             }
@@ -212,7 +328,10 @@ class HybridTikTokRepository(
         return playbackProvider.resolvePlaybackTarget(video)
     }
 
-    suspend fun runHealthChecks(): List<EndpointHealth> = fallbackManager.runHealthChecks()
+    suspend fun runHealthChecks(): List<EndpointHealth> {
+        refreshCommunityProxiTokDirectory()
+        return fallbackManager.runHealthChecks()
+    }
 
     fun rotateEndpoints() {
         fallbackManager.rotateEndpointOrder()
@@ -228,29 +347,41 @@ class HybridTikTokRepository(
 
     fun cacheEntryCount(): Int = cache.entryCount()
 
-    private fun buildActiveProxiTokList(): List<ProxiTokProvider> {
+    private fun buildSelfHostedOnly(): List<ProxiTokProvider> {
         val customUrl = _privacyConfig.value.customProxiTokBaseUrl
         return if (customUrl.isNotBlank() && PrivacyPolicyEnforcer.isSafeHttpsUrl(customUrl)) {
-            listOf(selfHostedFactory(customUrl)) + proxiTokInstances
+            listOf(selfHostedFactory(customUrl))
         } else {
-            proxiTokInstances
+            emptyList()
         }
     }
 
     private fun buildFeedAttempts(): List<ProviderEndpointCall<FeedPage>> {
-        val proxiAttempts = buildActiveProxiTokList().map { provider ->
+        val selfHosted = buildSelfHostedOnly().map { provider ->
+            ProviderEndpointCall(provider.providerId, provider.displayLabel, provider.sourceKind) {
+                provider.fetchTrendingFeed()
+            }
+        }
+        val tikWmCall = tikWmProvider?.let {
+            listOf(
+                ProviderEndpointCall(it.providerId, "Public Stream · TikWM", it.sourceKind) {
+                    it.fetchTrendingFeed()
+                }
+            )
+        }.orEmpty()
+        val proxiAttempts = dynamicProxiTokInstances.value.map { provider ->
             ProviderEndpointCall(provider.providerId, provider.displayLabel, provider.sourceKind) {
                 provider.fetchTrendingFeed()
             }
         }
         val officialFallback = ProviderEndpointCall(
             publicContentAdapter.providerId,
-            "TikTok Official oEmbed + Embed v2",
+            "TikTok Official oEmbed + Embed v3",
             publicContentAdapter.sourceKind
         ) {
             publicContentAdapter.fetchTrendingFeed()
         }
-        return proxiAttempts + officialFallback
+        return selfHosted + tikWmCall + proxiAttempts + officialFallback
     }
 
     private fun detectMode(query: String): SearchMode {
@@ -277,9 +408,7 @@ class HybridTikTokRepository(
 
             val defaultProxiTokEndpoints = listOf(
                 Triple("proxitok_pablo", "https://proxitok.pabloferreiro.es", "ProxiTok · pabloferreiro.es"),
-                Triple("proxitok_pussthecat", "https://proxitok.pussthecat.org", "ProxiTok · pussthecat.org"),
-                Triple("proxitok_adminforge", "https://tok.adminforge.de", "ProxiTok · adminforge.de"),
-                Triple("proxitok_privacydev", "https://proxitok.privacydev.net", "ProxiTok · privacydev.net")
+                Triple("proxitok_adminforge", "https://tok.adminforge.de", "ProxiTok · adminforge.de")
             )
 
             val proxiProviders = defaultProxiTokEndpoints.map { (id, url, label) ->
@@ -292,15 +421,18 @@ class HybridTikTokRepository(
                 )
             }
 
+            val tikWmProvider = TikWmPublicProvider(okHttp, moshi)
             val oEmbedProvider = TikTokOEmbedVideoProvider(oEmbedService, okHttp)
             val publicAdapter = TikTokPublicContentAdapter(oEmbedProvider, okHttp)
             val fallbackManager = TikTokFallbackManagerImpl(
                 okHttpClient = okHttp,
+                retryPolicy = RetryBackoffPolicy(maxAttempts = 1),
                 healthCheckTargets = {
-                    defaultProxiTokEndpoints.map { (id, url, _) -> id to "$url/trending" } +
+                    listOf(tikWmProvider.providerId to "https://www.tikwm.com/api/feed/list?region=ID&count=1") +
+                        defaultProxiTokEndpoints.map { (id, url, _) -> id to "$url/trending" } +
                         listOf(
                             oEmbedProvider.providerId to "https://www.tiktok.com/oembed?url=https://www.tiktok.com/@tiktok/video/7106594312292453675",
-                            publicAdapter.providerId to "https://www.tiktok.com/embed/v2/7106594312292453675"
+                            publicAdapter.providerId to "https://www.tiktok.com/embed/v3/7106594312292453675"
                         )
                 }
             )
@@ -309,6 +441,7 @@ class HybridTikTokRepository(
                 cache = EphemeralMetadataCache(),
                 okHttpClient = okHttp,
                 fallbackManager = fallbackManager,
+                tikWmProvider = tikWmProvider,
                 proxiTokInstances = proxiProviders,
                 oEmbedVideoProvider = oEmbedProvider,
                 publicContentAdapter = publicAdapter,

@@ -55,7 +55,7 @@ class ViewerViewModel(
     private val repository: HybridTikTokRepository
 ) : ViewModel() {
 
-    private val _feedState = MutableStateFlow<FeedUiState>(FeedUiState.Loading("ProxiTok · Public Nodes"))
+    private val _feedState = MutableStateFlow<FeedUiState>(FeedUiState.Loading("Menghubungkan ke stream publik..."))
     val feedState: StateFlow<FeedUiState> = _feedState.asStateFlow()
 
     private val _searchState = MutableStateFlow<SearchUiState>(SearchUiState.Idle)
@@ -66,6 +66,12 @@ class ViewerViewModel(
 
     private val _isMuted = MutableStateFlow(false)
     val isMuted: StateFlow<Boolean> = _isMuted.asStateFlow()
+
+    private val _isPaused = MutableStateFlow(false)
+    val isPaused: StateFlow<Boolean> = _isPaused.asStateFlow()
+
+    private val _selectedTopic = MutableStateFlow("Trending")
+    val selectedTopic: StateFlow<String> = _selectedTopic.asStateFlow()
 
     private val _isSearchOpen = MutableStateFlow(false)
     val isSearchOpen: StateFlow<Boolean> = _isSearchOpen.asStateFlow()
@@ -89,45 +95,62 @@ class ViewerViewModel(
 
     fun loadFeed(forceRefresh: Boolean = false) {
         viewModelScope.launch {
-            _feedState.value = FeedUiState.Loading("Connecting anonymously via HTTPS...")
-            when (val res = repository.loadPublicFeed(forceRefresh)) {
-                is ProviderResult.Success -> {
-                    _currentVideoIndex.value = 0
-                    _feedState.value = FeedUiState.Ready(
-                        videos = res.data.videos,
-                        activeSourceLabel = res.endpoint,
-                        noticeMessage = res.data.noticeMessage
-                    )
-                    _cacheCount.value = repository.cacheEntryCount()
-                }
-                is ProviderResult.RateLimited -> {
-                    _feedState.value = FeedUiState.Error(
-                        title = "Rate Limit Cooldown (HTTP 429)",
-                        message = res.message,
-                        isRateLimited = true,
-                        retryAfterSeconds = res.retryAfterSeconds
-                    )
-                }
-                is ProviderResult.AccessRestricted -> {
-                    _feedState.value = FeedUiState.Error(
-                        title = if (res.isCaptcha) "Verification Required (CAPTCHA)" else "Access Restricted (HTTP ${res.statusCode})",
-                        message = res.message,
-                        isCaptcha = res.isCaptcha,
-                        isForbidden = !res.isCaptcha
-                    )
-                }
-                is ProviderResult.NetworkError -> {
-                    _feedState.value = FeedUiState.Error(
-                        title = "Upstream Unreachable",
-                        message = "${res.message}. Check connection or switch to another public source."
-                    )
-                }
-                is ProviderResult.ContentUnavailable -> {
-                    _feedState.value = FeedUiState.Error(
-                        title = "No Public Stream Available",
-                        message = res.message
-                    )
-                }
+            _isPaused.value = false
+            _feedState.value = FeedUiState.Loading("TikWM · ProxiTok · Official Embed v3")
+            val res = repository.loadPublicFeed(forceRefresh)
+            applyFeedResult(res)
+        }
+    }
+
+    fun selectTopic(topic: String) {
+        _selectedTopic.value = topic
+        _isPaused.value = false
+        viewModelScope.launch {
+            _feedState.value = FeedUiState.Loading("Memuat $topic secara anonim...")
+            val res = repository.loadTopicFeed(topic)
+            applyFeedResult(res)
+        }
+    }
+
+    private fun applyFeedResult(res: ProviderResult<com.gendev.tiktokviewer.domain.model.FeedPage>) {
+        when (res) {
+            is ProviderResult.Success -> {
+                _currentVideoIndex.value = 0
+                _isPaused.value = false
+                _feedState.value = FeedUiState.Ready(
+                    videos = res.data.videos,
+                    activeSourceLabel = res.endpoint,
+                    noticeMessage = res.data.noticeMessage
+                )
+                _cacheCount.value = repository.cacheEntryCount()
+            }
+            is ProviderResult.RateLimited -> {
+                _feedState.value = FeedUiState.Error(
+                    title = "Rate Limit Cooldown (HTTP 429)",
+                    message = res.message,
+                    isRateLimited = true,
+                    retryAfterSeconds = res.retryAfterSeconds
+                )
+            }
+            is ProviderResult.AccessRestricted -> {
+                _feedState.value = FeedUiState.Error(
+                    title = if (res.isCaptcha) "Verification Required (CAPTCHA)" else "Access Restricted (HTTP ${res.statusCode})",
+                    message = res.message,
+                    isCaptcha = res.isCaptcha,
+                    isForbidden = !res.isCaptcha
+                )
+            }
+            is ProviderResult.NetworkError -> {
+                _feedState.value = FeedUiState.Error(
+                    title = "Koneksi Server Bermasalah",
+                    message = "${res.message}. Ketuk Switch untuk rotasi sumber atau periksa koneksi internet."
+                )
+            }
+            is ProviderResult.ContentUnavailable -> {
+                _feedState.value = FeedUiState.Error(
+                    title = "Stream Tidak Tersedia",
+                    message = res.message
+                )
             }
         }
     }
@@ -135,6 +158,7 @@ class ViewerViewModel(
     fun onPageSelected(index: Int) {
         if (index >= 0) {
             _currentVideoIndex.value = index
+            _isPaused.value = false
         }
     }
 
@@ -142,20 +166,28 @@ class ViewerViewModel(
         _isMuted.value = !_isMuted.value
     }
 
+    fun togglePlayPause() {
+        _isPaused.value = !_isPaused.value
+    }
+
     fun openSearch() {
+        _isPaused.value = true
         _isSearchOpen.value = true
     }
 
     fun closeSearch() {
         _isSearchOpen.value = false
+        _isPaused.value = false
     }
 
     fun openResilienceSheet() {
+        _isPaused.value = true
         _isResilienceOpen.value = true
     }
 
     fun closeResilienceSheet() {
         _isResilienceOpen.value = false
+        _isPaused.value = false
     }
 
     fun clearBanner() {
@@ -208,6 +240,7 @@ class ViewerViewModel(
 
     fun openHashtagFromFeed(hashtag: String) {
         val clean = "#${hashtag.removePrefix("#")}"
+        _isPaused.value = true
         _isSearchOpen.value = true
         performSearch(clean, SearchMode.HASHTAG)
     }
@@ -220,12 +253,13 @@ class ViewerViewModel(
             noticeMessage = "Public discovery stream · No history saved"
         )
         _currentVideoIndex.value = 0
+        _isPaused.value = false
         _isSearchOpen.value = false
     }
 
     fun openDeepLink(url: String) {
         viewModelScope.launch {
-            _feedState.value = FeedUiState.Loading("Resolving public link anonymously...")
+            _feedState.value = FeedUiState.Loading("Membuka tautan publik secara anonim...")
             when (val res = repository.resolveVideoLink(url)) {
                 is ProviderResult.Success -> {
                     _feedState.value = FeedUiState.Ready(
@@ -234,6 +268,7 @@ class ViewerViewModel(
                         noticeMessage = "Opened direct public link anonymously"
                     )
                     _currentVideoIndex.value = 0
+                    _isPaused.value = false
                 }
                 is ProviderResult.RateLimited -> {
                     _feedState.value = FeedUiState.Error(
@@ -261,9 +296,6 @@ class ViewerViewModel(
         }
     }
 
-    /**
-     * Automatically downgrades a direct Media3 stream to Official TikTok Embed v2 if the direct CDN URL fails/blocks.
-     */
     fun fallbackVideoToEmbed(videoId: String, reason: String) {
         val current = _feedState.value as? FeedUiState.Ready ?: return
         val updated = current.videos.map { video ->
@@ -271,7 +303,7 @@ class ViewerViewModel(
                 video.copy(
                     directMediaUrl = null,
                     playbackMode = PlaybackMode.ISOLATED_EMBED_WEBVIEW,
-                    sourceLabel = "TikTok Official Embed v2 (Fallback)"
+                    sourceLabel = "TikTok Official Embed v3 (Fallback)"
                 )
             } else {
                 video
@@ -286,12 +318,12 @@ class ViewerViewModel(
     fun switchSourceAndRetry() {
         repository.rotateEndpoints()
         _bannerMessage.value = "Rotated to next healthy public endpoint"
-        loadFeed(forceRefresh = true)
+        selectTopic(_selectedTopic.value)
     }
 
     fun runHealthChecks() {
         viewModelScope.launch {
-            _bannerMessage.value = "Running HTTPS health probes..."
+            _bannerMessage.value = "Syncing ProxiTok directory & running health checks..."
             repository.runHealthChecks()
             _bannerMessage.value = "Endpoint health checks updated"
         }

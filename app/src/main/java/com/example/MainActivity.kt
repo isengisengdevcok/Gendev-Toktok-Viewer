@@ -67,7 +67,9 @@ fun GendevViewerApp(viewModel: ViewerViewModel) {
     val feedState by viewModel.feedState.collectAsStateWithLifecycle()
     val searchState by viewModel.searchState.collectAsStateWithLifecycle()
     val currentIndex by viewModel.currentVideoIndex.collectAsStateWithLifecycle()
+    val isPaused by viewModel.isPaused.collectAsStateWithLifecycle()
     val isMuted by viewModel.isMuted.collectAsStateWithLifecycle()
+    val selectedTopic by viewModel.selectedTopic.collectAsStateWithLifecycle()
     val isSearchOpen by viewModel.isSearchOpen.collectAsStateWithLifecycle()
     val isResilienceOpen by viewModel.isResilienceOpen.collectAsStateWithLifecycle()
     val endpointHealth by viewModel.endpointHealth.collectAsStateWithLifecycle()
@@ -79,11 +81,15 @@ fun GendevViewerApp(viewModel: ViewerViewModel) {
         ViewerFeedScreen(
             feedState = feedState,
             currentIndex = currentIndex,
+            isPaused = isPaused,
             isMuted = isMuted,
+            selectedTopic = selectedTopic,
             endpointHealth = endpointHealth,
             okHttpClient = viewModel.okHttpClient,
             onPageChanged = viewModel::onPageSelected,
+            onTogglePlayPause = viewModel::togglePlayPause,
             onToggleMute = viewModel::toggleMute,
+            onSelectTopic = viewModel::selectTopic,
             onOpenSearch = viewModel::openSearch,
             onOpenResilience = viewModel::openResilienceSheet,
             onHashtagClick = viewModel::openHashtagFromFeed,

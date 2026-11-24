@@ -10,7 +10,7 @@ enum class VideoSourceKind(val displayName: String) {
 
 enum class PlaybackMode(val badgeText: String) {
     EXO_DIRECT_STREAM("MEDIA3"),
-    ISOLATED_EMBED_WEBVIEW("EMBED v2")
+    ISOLATED_EMBED_WEBVIEW("EMBED v3")
 }
 
 data class PublicVideo(

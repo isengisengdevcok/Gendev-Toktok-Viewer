@@ -27,7 +27,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.gendev.tiktokviewer.ui.theme.AmoledBlack
 
 /**
- * Isolated WebView player restricted strictly to TikTok Official Embed v2 URLs.
+ * Isolated WebView player restricted strictly to TikTok Official Embed URLs.
  * Disables cookies, persistent DOM storage, and blocks redirects to login/tracking pages.
  */
 @SuppressLint("SetJavaScriptEnabled")
@@ -35,6 +35,7 @@ import com.gendev.tiktokviewer.ui.theme.AmoledBlack
 fun IsolatedEmbedPlayer(
     embedUrl: String,
     isActivePage: Boolean,
+    isPaused: Boolean,
     isMuted: Boolean,
     onLoadingChanged: (Boolean) -> Unit,
     onEmbedBlocked: (statusCode: Int, isCaptcha: Boolean, message: String) -> Unit,
@@ -97,7 +98,6 @@ fun IsolatedEmbedPlayer(
                     if (uri.scheme != "https") return true
                     val host = uri.host?.lowercase().orEmpty()
                     val path = uri.path?.lowercase().orEmpty()
-                    // Block navigation to login, signup, or external redirect pages
                     if (path.contains("login") || path.contains("signup")) {
                         return true
                     }
@@ -151,6 +151,16 @@ fun IsolatedEmbedPlayer(
         } else {
             webView.onPause()
             webView.loadUrl("about:blank")
+        }
+    }
+
+    LaunchedEffect(isPaused, isActivePage) {
+        if (isActivePage) {
+            val action = if (isPaused) "pause()" else "play()"
+            webView.evaluateJavascript(
+                "try{document.querySelectorAll('video').forEach(function(v){v.$action;});}catch(e){}",
+                null
+            )
         }
     }
 

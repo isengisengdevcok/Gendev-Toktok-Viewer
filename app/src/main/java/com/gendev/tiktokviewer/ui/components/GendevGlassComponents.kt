@@ -10,7 +10,6 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -26,7 +25,9 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Block
+import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Security
 import androidx.compose.material.icons.rounded.SwapHoriz
 import androidx.compose.material.icons.rounded.Timer
@@ -44,6 +45,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -54,6 +57,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.gendev.tiktokviewer.ui.theme.AmberRateLimit
+import com.gendev.tiktokviewer.ui.theme.AmoledBlack
 import com.gendev.tiktokviewer.ui.theme.DarkGlassBg
 import com.gendev.tiktokviewer.ui.theme.DarkGlassBorder
 import com.gendev.tiktokviewer.ui.theme.DarkGlassStrong
@@ -66,6 +70,28 @@ import com.gendev.tiktokviewer.ui.theme.NeonViolet
 import com.gendev.tiktokviewer.ui.theme.PureWhite
 import com.gendev.tiktokviewer.ui.theme.RoseRestricted
 import com.gendev.tiktokviewer.ui.theme.UltravioletGlow
+
+fun Modifier.ambientObsidianAura(): Modifier = this.drawBehind {
+    drawRect(AmoledBlack)
+    drawCircle(
+        brush = Brush.radialGradient(
+            colors = listOf(ElectricPurple.copy(alpha = 0.22f), Color.Transparent),
+            center = Offset(size.width * 0.2f, size.height * 0.18f),
+            radius = size.maxDimension * 0.55f
+        ),
+        radius = size.maxDimension * 0.55f,
+        center = Offset(size.width * 0.2f, size.height * 0.18f)
+    )
+    drawCircle(
+        brush = Brush.radialGradient(
+            colors = listOf(UltravioletGlow.copy(alpha = 0.18f), Color.Transparent),
+            center = Offset(size.width * 0.85f, size.height * 0.78f),
+            radius = size.maxDimension * 0.5f
+        ),
+        radius = size.maxDimension * 0.5f,
+        center = Offset(size.width * 0.85f, size.height * 0.78f)
+    )
+}
 
 @Composable
 fun GendevLogoBadge(modifier: Modifier = Modifier) {
@@ -152,18 +178,19 @@ fun GlassIconButton(
     onClick: () -> Unit,
     testTagName: String,
     isHighlighted: Boolean = false,
+    sizeDp: Int = 48,
     modifier: Modifier = Modifier
 ) {
     Surface(
         onClick = onClick,
         shape = CircleShape,
-        color = if (isHighlighted) DeepPlum.copy(alpha = 0.85f) else DarkGlassBg,
+        color = if (isHighlighted) DeepPlum.copy(alpha = 0.90f) else DarkGlassBg,
         border = BorderStroke(
             width = 1.dp,
-            color = if (isHighlighted) ElectricPurple else DarkGlassSubtleBorder
+            color = if (isHighlighted) NeonViolet else DarkGlassSubtleBorder
         ),
         modifier = modifier
-            .size(48.dp)
+            .size(sizeDp.dp)
             .minimumInteractiveComponentSize()
             .testTag(testTagName)
     ) {
@@ -172,7 +199,7 @@ fun GlassIconButton(
                 imageVector = icon,
                 contentDescription = contentDescription,
                 tint = if (isHighlighted) NeonViolet else PureWhite,
-                modifier = Modifier.size(21.dp)
+                modifier = Modifier.size((sizeDp * 0.45f).dp)
             )
         }
     }
@@ -237,6 +264,70 @@ fun GendevPulseLoader(
             color = MutedLavender,
             textAlign = TextAlign.Center
         )
+    }
+}
+
+@Composable
+fun GendevInitialHeroLoader(
+    sourceHint: String,
+    onOpenSearch: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        shape = RoundedCornerShape(28.dp),
+        color = DarkGlassStrong,
+        border = BorderStroke(1.dp, DarkGlassBorder),
+        modifier = modifier
+            .widthIn(max = 380.dp)
+            .fillMaxWidth()
+            .padding(horizontal = 24.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            GendevPulseLoader(label = sourceHint)
+
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier
+                    .clip(RoundedCornerShape(50))
+                    .background(DeepPlum.copy(alpha = 0.7f))
+                    .border(1.dp, DarkGlassBorder, RoundedCornerShape(50))
+                    .padding(horizontal = 12.dp, vertical = 6.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.Lock,
+                    contentDescription = null,
+                    tint = NeonViolet,
+                    modifier = Modifier.size(14.dp)
+                )
+                Text(
+                    text = "Anonymous Mode · Zero Login · Zero History",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = PureWhite
+                )
+            }
+
+            OutlinedButton(
+                onClick = onOpenSearch,
+                border = BorderStroke(1.dp, DarkGlassBorder),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .minimumInteractiveComponentSize()
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.Search,
+                    contentDescription = null,
+                    tint = NeonViolet,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Paste TikTok Link or #Tag", color = PureWhite)
+            }
+        }
     }
 }
 

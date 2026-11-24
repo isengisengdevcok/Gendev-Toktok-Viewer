@@ -31,9 +31,9 @@ class ProxiTokProvider(
 
     override suspend fun fetchTrendingFeed(cursor: String?): ProviderResult<FeedPage> {
         val rssUrl = if (cursor.isNullOrBlank()) {
-            "$normalizedBaseUrl/trending?format=rss"
+            "$normalizedBaseUrl/trending/rss"
         } else {
-            "$normalizedBaseUrl/trending?format=rss&cursor=${encode(cursor)}"
+            "$normalizedBaseUrl/trending/rss?cursor=${encode(cursor)}"
         }
         return when (val result = fetchVideosFromRoute(rssUrl, "$normalizedBaseUrl/trending")) {
             is ProviderResult.Success -> ProviderResult.Success(
@@ -85,7 +85,7 @@ class ProxiTokProvider(
         }
         val encoded = encode(cleanTag)
         return fetchVideosFromRoute(
-            rssUrl = "$normalizedBaseUrl/tag/$encoded?format=rss",
+            rssUrl = "$normalizedBaseUrl/tag/$encoded/rss",
             htmlFallbackUrl = "$normalizedBaseUrl/tag/$encoded"
         )
     }
@@ -97,7 +97,7 @@ class ProxiTokProvider(
         }
         val encoded = encode(cleanHandle)
         return fetchVideosFromRoute(
-            rssUrl = "$normalizedBaseUrl/@$encoded?format=rss",
+            rssUrl = "$normalizedBaseUrl/@$encoded/rss",
             htmlFallbackUrl = "$normalizedBaseUrl/@$encoded",
             fallbackAuthor = cleanHandle
         )

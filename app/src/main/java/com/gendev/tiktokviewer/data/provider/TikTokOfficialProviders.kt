@@ -79,10 +79,10 @@ class TikTokOEmbedVideoProvider(
                             hashtags = TikTokLinkParser.extractHashtags(title),
                             thumbnailUrl = dto.thumbnailUrl?.takeIf { PrivacyPolicyEnforcer.isSafeHttpsUrl(it) },
                             directMediaUrl = null,
-                            embedUrl = "https://www.tiktok.com/embed/v2/$videoId",
+                            embedUrl = "https://www.tiktok.com/embed/v3/$videoId",
                             canonicalUrl = "https://www.tiktok.com/@$handle/video/$videoId",
                             sourceKind = VideoSourceKind.TIKTOK_OEMBED,
-                            sourceLabel = "TikTok Official oEmbed + Embed v2",
+                            sourceLabel = "TikTok Official oEmbed + Embed v3",
                             playbackMode = PlaybackMode.ISOLATED_EMBED_WEBVIEW
                         ),
                         sourceKind = VideoSourceKind.TIKTOK_OEMBED,
@@ -90,7 +90,7 @@ class TikTokOEmbedVideoProvider(
                     )
                 }
 
-                // If oEmbed returns 400/404 for an ID-only canonical URL, allow Official Embed v2 attempt
+                // If oEmbed returns 400/404 for an ID-only canonical URL, allow Official Embed v3 attempt
                 ProviderResult.Success(
                     data = PublicVideo(
                         id = parsed.videoId,
@@ -103,11 +103,11 @@ class TikTokOEmbedVideoProvider(
                         embedUrl = parsed.embedUrl,
                         canonicalUrl = parsed.canonicalUrl,
                         sourceKind = VideoSourceKind.TIKTOK_EMBED_PLAYER,
-                        sourceLabel = "TikTok Official Embed v2",
+                        sourceLabel = "TikTok Official Embed v3",
                         playbackMode = PlaybackMode.ISOLATED_EMBED_WEBVIEW
                     ),
                     sourceKind = VideoSourceKind.TIKTOK_EMBED_PLAYER,
-                    endpoint = "TikTok Official Embed v2"
+                    endpoint = "TikTok Official Embed v3"
                 )
             } catch (t: Throwable) {
                 ProviderResult.NetworkError(
@@ -165,8 +165,8 @@ class TikTokPublicContentAdapter(
                     videos = resolved,
                     nextCursor = null,
                     sourceKind = VideoSourceKind.TIKTOK_OEMBED,
-                    sourceEndpoint = "TikTok Official oEmbed + Embed v2",
-                    noticeMessage = "Active via Official TikTok Embed v2 (ProxiTok instances rotated)"
+                    sourceEndpoint = "TikTok Official oEmbed + Embed v3",
+                    noticeMessage = "Active via Official TikTok Embed v3 (ProxiTok instances rotated)"
                 ),
                 sourceKind = VideoSourceKind.TIKTOK_OEMBED,
                 endpoint = "TikTok Official oEmbed"
@@ -319,10 +319,10 @@ class TikTokPlaybackProviderImpl : TikTokPlaybackProvider {
                     videoId = video.id,
                     mode = PlaybackMode.ISOLATED_EMBED_WEBVIEW,
                     streamUrl = video.embedUrl,
-                    sourceLabel = "TikTok Official Embed v2"
+                    sourceLabel = "TikTok Official Embed v3"
                 ),
                 sourceKind = VideoSourceKind.TIKTOK_EMBED_PLAYER,
-                endpoint = "TikTok Official Embed v2"
+                endpoint = "TikTok Official Embed v3"
             )
         }
 

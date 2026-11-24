@@ -1,5 +1,8 @@
 package com.gendev.tiktokviewer
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
@@ -15,6 +18,7 @@ import com.gendev.tiktokviewer.ui.components.ResilientErrorCard
 import com.gendev.tiktokviewer.ui.screens.ViewerFeedScreen
 import com.gendev.tiktokviewer.ui.theme.GendevTheme
 import com.gendev.tiktokviewer.ui.viewmodel.FeedUiState
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -38,10 +42,10 @@ class GendevComposeUiTest {
             hashtags = listOf("nature"),
             thumbnailUrl = null,
             directMediaUrl = "https://cdn.example/1001.mp4",
-            embedUrl = "https://www.tiktok.com/embed/v2/1001",
+            embedUrl = "https://www.tiktok.com/embed/v3/1001",
             canonicalUrl = "https://www.tiktok.com/@creator_one/video/1001",
             sourceKind = VideoSourceKind.PROXITOK_PUBLIC,
-            sourceLabel = "ProxiTok Public",
+            sourceLabel = "Public Stream · TikWM",
             playbackMode = PlaybackMode.EXO_DIRECT_STREAM
         ),
         PublicVideo(
@@ -52,27 +56,34 @@ class GendevComposeUiTest {
             hashtags = listOf("tech"),
             thumbnailUrl = null,
             directMediaUrl = "https://cdn.example/1002.mp4",
-            embedUrl = "https://www.tiktok.com/embed/v2/1002",
+            embedUrl = "https://www.tiktok.com/embed/v3/1002",
             canonicalUrl = "https://www.tiktok.com/@creator_two/video/1002",
             sourceKind = VideoSourceKind.PROXITOK_PUBLIC,
-            sourceLabel = "ProxiTok Public",
+            sourceLabel = "Public Stream · TikWM",
             playbackMode = PlaybackMode.EXO_DIRECT_STREAM
         )
     )
 
     @Test
-    fun `3_vertical_swipe_updates_active_video_and_hides_social_buttons`() {
+    fun `3_vertical_swipe_play_pause_and_zero_social_buttons`() {
         var lastPage = 0
+        var pausedState by mutableStateOf(false)
+        var selectedTopic by mutableStateOf("Trending")
+
         composeTestRule.setContent {
             GendevTheme {
                 ViewerFeedScreen(
-                    feedState = FeedUiState.Ready(sampleVideos, "ProxiTok Public"),
+                    feedState = FeedUiState.Ready(sampleVideos, "Public Stream · TikWM"),
                     currentIndex = 0,
+                    isPaused = pausedState,
                     isMuted = false,
+                    selectedTopic = selectedTopic,
                     endpointHealth = emptyList(),
                     okHttpClient = PrivacyPolicyEnforcer.createPrivacyOkHttpClient(),
                     onPageChanged = { lastPage = it },
+                    onTogglePlayPause = { pausedState = !pausedState },
                     onToggleMute = {},
+                    onSelectTopic = { selectedTopic = it },
                     onOpenSearch = {},
                     onOpenResilience = {},
                     onHashtagClick = {},
@@ -87,7 +98,18 @@ class GendevComposeUiTest {
         composeTestRule.onNodeWithText("GENDEV").assertIsDisplayed()
         composeTestRule.onNodeWithText("@creator_one").assertIsDisplayed()
         composeTestRule.onNodeWithTag("open_search_button").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("play_pause_button").assertIsDisplayed()
         composeTestRule.onNodeWithTag("mute_toggle_button").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("topic_pill_Trending").assertIsDisplayed()
+
+        // Toggle Play/Pause button
+        composeTestRule.onNodeWithTag("play_pause_button").performClick()
+        composeTestRule.waitForIdle()
+        assertTrue(pausedState)
+
+        composeTestRule.onNodeWithTag("play_pause_button").performClick()
+        composeTestRule.waitForIdle()
+        assertEquals(false, pausedState)
 
         // Verify zero social buttons exist
         composeTestRule.onNodeWithText("Like").assertDoesNotExist()

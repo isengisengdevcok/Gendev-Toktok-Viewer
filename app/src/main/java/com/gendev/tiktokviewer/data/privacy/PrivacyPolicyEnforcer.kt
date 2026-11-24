@@ -55,8 +55,8 @@ object PrivacyPolicyEnforcer {
     }
 
     fun createPrivacyOkHttpClient(
-        connectTimeoutMs: Long = 6_000L,
-        readTimeoutMs: Long = 8_000L
+        connectTimeoutMs: Long = 4_500L,
+        readTimeoutMs: Long = 6_000L
     ): OkHttpClient {
         return OkHttpClient.Builder()
             .cookieJar(noCookieJar)

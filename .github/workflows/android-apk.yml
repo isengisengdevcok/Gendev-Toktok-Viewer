@@ -14,19 +14,22 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up JDK 21
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: 'temurin'
           java-version: '21'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Accept Android SDK Licenses
-        run: yes | sdkmanager --licenses >/dev/null 2>&1 || true
+      - name: Accept Android SDK Licenses & Prepare SDK
+        run: |
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          SDKMANAGER="$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+          if [ -x "$SDKMANAGER" ]; then
+            yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
+            "$SDKMANAGER" "platform-tools" "platforms;android-36" "build-tools;36.0.0" || true
+          fi
 
       - name: Decode debug keystore
         run: |
@@ -42,10 +45,10 @@ jobs:
         run: |
           if [ -n "$KEYSTORE_BASE64" ]; then
             echo "$KEYSTORE_BASE64" | base64 -d > my-upload-key.jks
+            echo "KEYSTORE_PATH=${{ github.workspace }}/my-upload-key.jks" >> $GITHUB_ENV
             echo "STORE_PASSWORD=$STORE_PASSWORD" >> $GITHUB_ENV
             echo "KEY_PASSWORD=$KEY_PASSWORD" >> $GITHUB_ENV
           else
-            # Ephemeral CI signing key when repository signing secrets are not yet configured
             keytool -genkeypair -v \
               -keystore my-upload-key.jks \
               -alias upload \
@@ -55,12 +58,13 @@ jobs:
               -storepass gendevci123 \
               -keypass gendevci123 \
               -dname "CN=GENDEV CI, OU=Mobile, O=GENDEV, L=Local, ST=NA, C=US"
+            echo "KEYSTORE_PATH=${{ github.workspace }}/my-upload-key.jks" >> $GITHUB_ENV
             echo "STORE_PASSWORD=gendevci123" >> $GITHUB_ENV
             echo "KEY_PASSWORD=gendevci123" >> $GITHUB_ENV
           fi
 
       - name: Set up Gradle 9.3.1
-        uses: gradle/actions/setup-gradle@v4
+        uses: gradle/actions/setup-gradle@v6
         with:
           gradle-version: '9.3.1'
 

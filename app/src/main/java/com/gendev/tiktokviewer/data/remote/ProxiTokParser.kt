@@ -11,7 +11,7 @@ object TikTokLinkParser {
         """https?://(?:www\.|m\.)?tiktok\.com/@([A-Za-z0-9_.]+)/video/(\d+)"""
     )
     private val embedUrlRegex = Regex(
-        """https?://(?:www\.)?tiktok\.com/embed(?:/v2)?/(\d+)"""
+        """https?://(?:www\.)?tiktok\.com/embed(?:/v[23])?/(\d+)"""
     )
     private val numericIdRegex = Regex("""^\d{15,22}$""")
     private val hashtagRegex = Regex("""#([A-Za-z0-9_\u00C0-\u024F]+)""")
@@ -30,7 +30,7 @@ object TikTokLinkParser {
                 videoId = trimmed,
                 authorHandle = null,
                 canonicalUrl = "https://www.tiktok.com/video/$trimmed",
-                embedUrl = "https://www.tiktok.com/embed/v2/$trimmed"
+                embedUrl = "https://www.tiktok.com/embed/v3/$trimmed"
             )
         }
 
@@ -41,7 +41,7 @@ object TikTokLinkParser {
                 videoId = id,
                 authorHandle = author,
                 canonicalUrl = "https://www.tiktok.com/@$author/video/$id",
-                embedUrl = "https://www.tiktok.com/embed/v2/$id"
+                embedUrl = "https://www.tiktok.com/embed/v3/$id"
             )
         }
 
@@ -51,7 +51,7 @@ object TikTokLinkParser {
                 videoId = id,
                 authorHandle = null,
                 canonicalUrl = "https://www.tiktok.com/video/$id",
-                embedUrl = "https://www.tiktok.com/embed/v2/$id"
+                embedUrl = "https://www.tiktok.com/embed/v3/$id"
             )
         }
 
@@ -119,7 +119,7 @@ object ProxiTokParser {
                 hashtags = TikTokLinkParser.extractHashtags(rawTitle),
                 thumbnailUrl = null,
                 directMediaUrl = resolvedStream,
-                embedUrl = "https://www.tiktok.com/embed/v2/$videoId",
+                embedUrl = "https://www.tiktok.com/embed/v3/$videoId",
                 canonicalUrl = "https://www.tiktok.com/@$author/video/$videoId",
                 sourceKind = sourceKind,
                 sourceLabel = sourceLabel,
